@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- .NET Framework 4.8: required for Windows 7 SP1+ support and best Wine compatibility. -->
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- x64 primary target per project spec. -->
+    <PlatformTarget>x64</PlatformTarget>
+    <RootNamespace>MediaRipperEncoder</RootNamespace>
+    <AssemblyName>MediaRipperEncoder</AssemblyName>
+    <Product>AutoRipper</Product>
+    <Version>0.1.0</Version>
+    <Copyright>Copyright (C) 2026 James Spurgeon (heto.black@gmail.com)</Copyright>
+    <!-- SPDX license identifier. Strong copyleft incl. network use — see /LICENSE. -->
+    <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
+    <!-- C# 7.3 is the newest language version fully supported on .NET Framework 4.8. -->
+    <LangVersion>7.3</LangVersion>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- WMI access (Win32_CDROMDrive) for enumerating optical drives. Part of the .NET
+         Framework, but SDK-style projects don't reference it by default. -->
+    <Reference Include="System.Management" />
+    <!-- HttpClient for the OMDb / TheTVDB metadata lookups (Phase 5). Part of the .NET
+         Framework, but not referenced by default in SDK-style projects. -->
+    <Reference Include="System.Net.Http" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Provides .NET Framework 4.8 reference assemblies at build time so the project
+         compiles on machines without the 4.8 Developer Pack installed. Build-time only;
+         nothing is shipped from this package. -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <!-- JSON settings serialization. Single self-contained DLL, rock-solid on .NET
+         Framework 4.8 and old hardware; bundled with the app (no runtime download). -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <!-- Reads/writes embedded media tags (Title) in the finished MP4/MKV so players and
+         Explorer show the episode name, not the disc label. Single managed DLL, no native
+         dependencies; fine on .NET Framework 4.8 / Windows 7. -->
+    <PackageReference Include="TagLibSharp" Version="2.3.0" />
+  </ItemGroup>
+
+</Project>

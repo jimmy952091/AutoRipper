@@ -1,0 +1,29 @@
+# Build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.user
+*.suo
+
+# NuGet
+packages/
+*.nupkg
+
+# Bundled binaries (shipped separately, not source-controlled)
+dist/redist/*.dll
+dist/redist/*.exe
+dist/redist/*.config
+
+# App runtime data (never commit — may contain the user's API keys / logs)
+settings.json
+*.log
+Logs*/
+
+# OS cruft
+Thumbs.db
+Desktop.ini

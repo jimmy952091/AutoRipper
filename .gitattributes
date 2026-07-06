@@ -1,0 +1,3 @@
+# Normalize line endings: store as LF in the repo, check out native per-platform.
+# Keeps diffs clean across Windows and the Linux/Wine target.
+* text=auto
