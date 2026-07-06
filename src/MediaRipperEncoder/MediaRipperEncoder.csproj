@@ -20,6 +20,15 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Ship the AGPL license text next to the exe so the Help > About dialog can display it
+         (and to satisfy the AGPL requirement that the license travel with the program). Path is
+         relative to this .csproj: the repo-root LICENSE two levels up. -->
+    <None Include="..\..\LICENSE" Link="LICENSE">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- WMI access (Win32_CDROMDrive) for enumerating optical drives. Part of the .NET
          Framework, but SDK-style projects don't reference it by default. -->
     <Reference Include="System.Management" />

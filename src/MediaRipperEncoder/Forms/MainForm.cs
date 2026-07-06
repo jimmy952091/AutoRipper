@@ -111,10 +111,22 @@ namespace MediaRipperEncoder.Forms
             };
             toolsMenu.DropDownItems.Add(_showWelcomeMenuItem);
 
+            var helpMenu = new ToolStripMenuItem("&Help");
+            helpMenu.DropDownItems.Add(new ToolStripMenuItem("&About AutoRipper...", null, OnAboutClicked));
+
             menu.Items.Add(fileMenu);
             menu.Items.Add(toolsMenu);
+            menu.Items.Add(helpMenu);
             MainMenuStrip = menu;
             Controls.Add(menu);
+        }
+
+        private void OnAboutClicked(object sender, EventArgs e)
+        {
+            using (var about = new AboutForm())
+            {
+                about.ShowDialog(this);
+            }
         }
 
         // ---------------- overall layout ----------------
