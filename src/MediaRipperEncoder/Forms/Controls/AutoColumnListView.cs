@@ -15,6 +15,14 @@ namespace MediaRipperEncoder.Forms.Controls
     /// </summary>
     public class AutoColumnListView : ListView
     {
+        public AutoColumnListView()
+        {
+            // Double-buffer so in-place cell/progress updates don't repaint-flicker the whole
+            // list. DoubleBuffered is protected, so it can only be set from a subclass like this.
+            DoubleBuffered = true;
+            SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
+        }
+
         // Win32 header-control notification plumbing.
         private const int WM_NOTIFY = 0x004E;
         private const int HDN_FIRST = -300;

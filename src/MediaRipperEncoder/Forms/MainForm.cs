@@ -39,10 +39,14 @@ namespace MediaRipperEncoder.Forms
         private Label _driveStatus;
 
         // Queues
+        private TableLayoutPanel _queuesSplit;
+        private GroupBox _ripGroup;
         private AutoColumnListView _ripList;
         private AutoColumnListView _encodeList;
         private ProgressBar _ripProgress;
         private ProgressBar _encodeProgress;
+        private Button _ripCollapseButton;
+        private bool _ripCollapsed;
         private Label _providerModeLabel;
         private Label _statusStrip;
 
@@ -217,7 +221,7 @@ namespace MediaRipperEncoder.Forms
 
         private Control BuildQueuesSplit()
         {
-            var split = new TableLayoutPanel
+            _queuesSplit = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 2,
@@ -225,18 +229,53 @@ namespace MediaRipperEncoder.Forms
                 Margin = new Padding(0, 6, 0, 6)
             };
             // Each queue takes exactly half the width — no overlap when narrow, no gap when wide.
-            split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            split.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            // Collapsing the rip side swaps these for Absolute/Percent to hand the width to encode.
+            _queuesSplit.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            _queuesSplit.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            _queuesSplit.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-            split.Controls.Add(BuildRipGroup(), 0, 0);
-            split.Controls.Add(BuildEncodeGroup(), 1, 0);
-            return split;
+            _queuesSplit.Controls.Add(BuildRipGroup(), 0, 0);
+            _queuesSplit.Controls.Add(BuildEncodeGroup(), 1, 0);
+            return _queuesSplit;
+        }
+
+        /// <summary>
+        /// Collapses the rip queue to a slim column (giving the width to the encode side) or
+        /// restores the 50/50 split. Handy once a disc is ripping and the user just wants to watch
+        /// the encodes; also sidesteps the rip list entirely when it's not the focus.
+        /// </summary>
+        private void ToggleRipCollapsed()
+        {
+            _ripCollapsed = !_ripCollapsed;
+            _queuesSplit.SuspendLayout();
+
+            if (_ripCollapsed)
+            {
+                // Slim fixed column for the rip side; encode takes everything else.
+                _queuesSplit.ColumnStyles[0] = new ColumnStyle(SizeType.Absolute, 200);
+                _queuesSplit.ColumnStyles[1] = new ColumnStyle(SizeType.Percent, 100);
+                _ripList.Visible = false;
+                _ripProgress.Visible = false;
+                _ripGroup.Text = "Rip queue (collapsed)";
+                _ripCollapseButton.Text = "Expand ▸";
+            }
+            else
+            {
+                _queuesSplit.ColumnStyles[0] = new ColumnStyle(SizeType.Percent, 50);
+                _queuesSplit.ColumnStyles[1] = new ColumnStyle(SizeType.Percent, 50);
+                _ripList.Visible = true;
+                _ripProgress.Visible = true;
+                _ripGroup.Text = "Rip queue (one disc at a time)";
+                _ripCollapseButton.Text = "Collapse ◂";
+            }
+
+            _queuesSplit.ResumeLayout();
         }
 
         private Control BuildRipGroup()
         {
             var group = new GroupBox { Text = "Rip queue (one disc at a time)", Dock = DockStyle.Fill, Margin = new Padding(0, 0, 5, 0) };
+            _ripGroup = group;
 
             var inner = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(6) };
             inner.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -261,10 +300,15 @@ namespace MediaRipperEncoder.Forms
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0, 4, 0, 0) };
             var stop = new Button { Text = "Stop current rip", Size = new Size(130, 26) };
             var retry = new Button { Text = "Retry failed title(s)", Size = new Size(160, 26) };
+            // Collapse/expand the rip side to hand its width to the encode side (kept visible even
+            // when collapsed so Stop/Retry stay reachable).
+            _ripCollapseButton = new Button { Text = "Collapse ◂", Size = new Size(90, 26) };
             stop.Click += OnStopRip;
             retry.Click += OnRetryFailed;
+            _ripCollapseButton.Click += (s, e) => ToggleRipCollapsed();
             buttons.Controls.Add(stop);
             buttons.Controls.Add(retry);
+            buttons.Controls.Add(_ripCollapseButton);
 
             inner.Controls.Add(_ripList, 0, 0);
             inner.Controls.Add(_ripProgress, 0, 1);
@@ -490,7 +534,13 @@ namespace MediaRipperEncoder.Forms
                 ListViewGroup group;
                 if (_ripGroups.TryGetValue(job.Id, out group))
                 {
-                    group.Header = job.DiscLabel + "  —  " + job.CurrentOperation;
+                    // Only rewrite the header when it actually changes. Reassigning a
+                    // ListViewGroup.Header forces the grouped list to re-layout and snaps the
+                    // scroll position back to the top, so doing it on every progress tick made the
+                    // rip side jump and flicker. CurrentOperation changes rarely (operation names,
+                    // not the percentage), so this update is now infrequent.
+                    string header = job.DiscLabel + "  —  " + job.CurrentOperation;
+                    if (group.Header != header) { group.Header = header; }
                 }
                 if (job.Status == RipStatus.Ripping || job.Status == RipStatus.Completed)
                 {

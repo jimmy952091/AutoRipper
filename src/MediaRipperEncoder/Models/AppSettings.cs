@@ -90,6 +90,19 @@ namespace MediaRipperEncoder.Models
         /// </summary>
         public string NetworkRipSource { get; set; }
 
+        // --- Distributed rip/encode (LAN-only server/client split) ---
+        // Standalone by default. A Server node encodes for a Client node that rips. LAN-only and
+        // unauthenticated by design (personal media backup across one's own machines).
+
+        /// <summary>This instance's role: Standalone (default), EncoderServer, or RipperClient.</summary>
+        public NodeRole NodeRole { get; set; }
+
+        /// <summary>TCP port the encoder server listens on (and the client connects to). LAN-only.</summary>
+        public int NodePort { get; set; }
+
+        /// <summary>Host/IP of the encoder server, used by a RipperClient to connect. Blank if Standalone/Server.</summary>
+        public string NodeServerHost { get; set; }
+
         public AppSettings()
         {
             // Sensible defaults for a brand-new install.
@@ -111,6 +124,9 @@ namespace MediaRipperEncoder.Models
             NetworkRipEnabled = false;
             NetworkRipSource = "";
             NetworkRipSearchSubfolders = true;
+            NodeRole = NodeRole.Standalone;
+            NodePort = 47820; // arbitrary high port for the LAN encode session
+            NodeServerHost = "";
         }
     }
 }
