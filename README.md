@@ -50,3 +50,15 @@ Output and the redistributable set are described in `dist/redist/DEPENDENCIES.md
 Core pipeline (rip → encode → Plex/Jellyfin placement) is complete and working. Remaining:
 the standalone Music-ripping window, the distributed rip/encode "connector" (LAN client/server
 nodes), and the offline installer.
+
+## Network mode security (LAN only — do not port-forward)
+
+AutoRipper's distributed rip/encode mode (Server Node / Client Node) is designed for
+**your own local network only**. Connections require a shared secret (HMAC challenge-response;
+the secret itself never crosses the wire), the encoder refuses to start without one, and
+received file names are confined to a staging inbox so remote input cannot write outside it.
+
+However, traffic is **not encrypted** (no TLS). Do **not** forward the node port through your
+router or expose it to the internet. If you need to check in remotely, use a proper VPN
+(e.g. WireGuard/Tailscale) into your LAN instead — that keeps the session encrypted end to end
+without AutoRipper needing to be reachable from the outside.
