@@ -19,6 +19,9 @@ namespace MediaRipperEncoder.Services.Net
         public string SessionId { get; private set; }
         public bool IsConnected { get { return _conn != null; } }
 
+        /// <summary>The live connection, for streaming files (see <see cref="FileTransfer"/>). Null until connected.</summary>
+        public PeerConnection Connection { get { return _conn; } }
+
         public LanClient(string clientName)
         {
             _clientName = string.IsNullOrWhiteSpace(clientName) ? Environment.MachineName : clientName;
