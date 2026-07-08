@@ -28,12 +28,9 @@ namespace MediaRipperEncoder.Services
         private readonly HandBrakeService _handBrake;
         private readonly EncodeQueue _encodeQueue;
 
-        // Resolved once so we don't re-read the preset files for every episode.
-        private readonly string _generalPresetPath;
-        private readonly string _generalPresetName;
-        private readonly string _animationPresetPath;
-        private readonly string _animationPresetName;
-        private readonly string _outputExtension;
+        // Shared naming/placement planner (also used by the remote encoder server, so a file
+        // encoded on another machine is named + placed identically).
+        private readonly EncodeJobPlanner _planner;
 
         /// <summary>Rip job status/progress changed (fires on a background thread).</summary>
         public event Action<RipJob> RipJobUpdated;
@@ -68,11 +65,7 @@ namespace MediaRipperEncoder.Services
             _handBrake = new HandBrakeService(settings.HandBrakeCliPath, settings.HandBrakePresetPath);
             _encodeQueue = new EncodeQueue(_handBrake);
 
-            _generalPresetPath = settings.HandBrakePresetPath;
-            _generalPresetName = PresetInfo.GetPresetName(settings.HandBrakePresetPath);
-            _animationPresetPath = settings.HandBrakeAnimationPresetPath;
-            _animationPresetName = PresetInfo.GetPresetName(settings.HandBrakeAnimationPresetPath);
-            _outputExtension = PresetInfo.GetContainerExtension(settings.HandBrakePresetPath);
+            _planner = EncodeJobPlanner.FromSettings(settings);
 
             _ripQueue.JobUpdated += j => { var h = RipJobUpdated; if (h != null) h(j); };
             _ripQueue.TitleUpdated += (j, t) => { var h = RipTitleUpdated; if (h != null) h(j, t); };
@@ -168,7 +161,7 @@ namespace MediaRipperEncoder.Services
             string baseLabel = "Title " + titleIndex.ToString("00");
             if (meta == null || meta.MediaType != MediaType.TvShow) { return baseLabel; }
 
-            TitleMapping m = FindMapping(meta, titleIndex);
+            TitleMapping m = EncodeJobPlanner.FindMapping(meta, titleIndex);
             if (m == null || m.Episodes == null || m.Episodes.Count == 0) { return baseLabel; }
 
             string code = "S" + meta.SeasonNumber.ToString("00") + "E" + m.FirstEpisodeNumber.ToString("000");
@@ -191,7 +184,7 @@ namespace MediaRipperEncoder.Services
             foreach (string mkv in job.OutputFiles)
             {
                 int titleIndex = ParseTitleIndex(mkv);
-                EncodeJob ej = BuildEncodeJob(meta, mkv, titleIndex);
+                EncodeJob ej = _planner.BuildEncodeJob(meta, mkv, titleIndex);
                 if (ej != null)
                 {
                     _encodeQueue.Enqueue(ej); // FIFO: appended to the back.
@@ -201,58 +194,6 @@ namespace MediaRipperEncoder.Services
                     Logger.Info("Skipping ripped file (no episode/feature mapping): " + mkv);
                 }
             }
-        }
-
-        private EncodeJob BuildEncodeJob(MediaMetadata meta, string mkvPath, int titleIndex)
-        {
-            LibraryTarget target = BuildTargetFor(meta, titleIndex);
-            if (target == null) { return null; } // excluded/unmapped title
-
-            bool useAnimation = !string.IsNullOrEmpty(_animationPresetName) &&
-                                string.Equals(meta.PresetName, _animationPresetName, StringComparison.Ordinal);
-
-            string presetPath = useAnimation ? _animationPresetPath : _generalPresetPath;
-            string presetName = useAnimation ? _animationPresetName : _generalPresetName;
-
-            // Encode to a staging file first, then move into the library with overwrite
-            // protection — so a partial encode never appears in the library.
-            string staging = Path.Combine(_settings.TempFolder,
-                "enc_" + Guid.NewGuid().ToString("N").Substring(0, 8), target.FileName);
-
-            return new EncodeJob
-            {
-                InputFile = mkvPath,
-                OutputFile = staging,
-                FinalTargetPath = target.FullPath,
-                PresetPath = presetPath,
-                PresetName = presetName,
-                TitleIndex = titleIndex,
-                DisplayName = target.FileName,
-                EmbeddedTitle = BuildEmbeddedTitle(meta, titleIndex, target)
-            };
-        }
-
-        /// <summary>
-        /// The Title tag to embed in the finished file. Leads with the show name for TV
-        /// ("Show - S01E009 (Episode Name)"), uses "Title (Year)" for movies, and falls back to the
-        /// file name (without extension) for kept extras. Original punctuation is preserved — this
-        /// is the display tag, not the sanitized filesystem name.
-        /// </summary>
-        private static string BuildEmbeddedTitle(MediaMetadata meta, int titleIndex, LibraryTarget target)
-        {
-            if (meta.MediaType == MediaType.Movie)
-            {
-                return LibraryPathBuilder.BuildMovieTitle(meta);
-            }
-
-            TitleMapping mapping = FindMapping(meta, titleIndex);
-            if (mapping != null && mapping.Kind == TitleKind.Episode &&
-                mapping.Episodes != null && mapping.Episodes.Count > 0)
-            {
-                return LibraryPathBuilder.BuildTvEpisodeTitle(meta, mapping);
-            }
-
-            return MediaTagWriter.TitleFromFileName(target.FullPath);
         }
 
         // ---------------- encode -> placement ----------------
@@ -310,53 +251,6 @@ namespace MediaRipperEncoder.Services
 
             Action<EncodeJob, PlacementResult> handler = FilePlaced;
             if (handler != null) { handler(job, result); }
-        }
-
-        private LibraryTarget BuildTargetFor(MediaMetadata meta, int titleIndex)
-        {
-            if (meta.MediaType == MediaType.Movie)
-            {
-                return LibraryPathBuilder.BuildMovie(_settings.MoviesRoot, meta, _outputExtension);
-            }
-
-            // TV: find the mapping for this ripped title.
-            TitleMapping mapping = FindMapping(meta, titleIndex);
-            if (mapping == null || !mapping.Include || mapping.Kind == TitleKind.Ignore)
-            {
-                return null;
-            }
-
-            if (mapping.Kind == TitleKind.Episode && mapping.Episodes != null && mapping.Episodes.Count > 0)
-            {
-                return LibraryPathBuilder.BuildTvEpisode(_settings.TvShowsRoot, meta, mapping, _outputExtension);
-            }
-
-            // A kept extra: place it under an Extras subfolder with a non-episode name so a
-            // media server never mistakes it for a numbered episode.
-            return BuildTvExtraTarget(meta, mapping);
-        }
-
-        private LibraryTarget BuildTvExtraTarget(MediaMetadata meta, TitleMapping mapping)
-        {
-            string show = FilenameSanitizer.Sanitize(meta.ShowName, "Unknown Show");
-            string folder = Path.Combine(_settings.TvShowsRoot ?? "", show, "Extras");
-            string fileName = "Extra - Title " + mapping.TitleIndex.ToString("00") + "." + _outputExtension;
-            return new LibraryTarget
-            {
-                Folder = folder,
-                FileName = fileName,
-                FullPath = Path.Combine(folder, fileName)
-            };
-        }
-
-        private static TitleMapping FindMapping(MediaMetadata meta, int titleIndex)
-        {
-            if (meta.TitleMappings == null) { return null; }
-            foreach (TitleMapping m in meta.TitleMappings)
-            {
-                if (m.TitleIndex == titleIndex) { return m; }
-            }
-            return null;
         }
 
         private static string DescribeDisc(MediaMetadata meta)
