@@ -42,6 +42,12 @@ namespace MediaRipperEncoder.Services.Net
         public string SessionId { get { return _sessionId; } }
         public bool IsRunning { get { return _running; } }
 
+        /// <summary>
+        /// The currently connected (authenticated) client, or null. Lets the host push
+        /// PROGRESS/JOB_DONE from encode worker threads; PeerConnection writes are lock-guarded.
+        /// </summary>
+        public PeerConnection CurrentClient { get; private set; }
+
         public void Start(int port)
         {
             if (_running) { return; }
@@ -59,6 +65,9 @@ namespace MediaRipperEncoder.Services.Net
             _listener = new TcpListener(IPAddress.Any, port);
             _listener.Start();
             Logger.Info("LanServer listening on port " + port + " (session " + _sessionId + ").");
+            Logger.Info("SECURITY NOTE: this session is designed for LAN use only. The shared-secret " +
+                        "handshake blocks unauthorized peers, but traffic is not encrypted — do NOT " +
+                        "port-forward this port to the internet.");
 
             _acceptThread = new Thread(AcceptLoop) { IsBackground = true, Name = "LanServer-Accept" };
             _acceptThread.Start();
@@ -122,18 +131,26 @@ namespace MediaRipperEncoder.Services.Net
                     .With("session", _sessionId));
 
                 Logger.Info("LanServer: client '" + clientName + "' connected.");
+                CurrentClient = conn;
                 var connected = ClientConnected; if (connected != null) { connected(clientName); }
 
-                // Message pump until the peer closes.
-                NetMessage msg;
-                while ((msg = conn.Read()) != null)
+                try
                 {
-                    if (msg.Type == MsgType.Heartbeat)
+                    // Message pump until the peer closes.
+                    NetMessage msg;
+                    while ((msg = conn.Read()) != null)
                     {
-                        conn.Write(new NetMessage(MsgType.Heartbeat));
-                        continue;
+                        if (msg.Type == MsgType.Heartbeat)
+                        {
+                            conn.Write(new NetMessage(MsgType.Heartbeat));
+                            continue;
+                        }
+                        var handler = MessageReceived; if (handler != null) { handler(msg, conn); }
                     }
-                    var handler = MessageReceived; if (handler != null) { handler(msg, conn); }
+                }
+                finally
+                {
+                    CurrentClient = null;
                 }
 
                 Logger.Info("LanServer: client '" + clientName + "' disconnected.");

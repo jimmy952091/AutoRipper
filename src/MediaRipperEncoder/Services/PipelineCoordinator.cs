@@ -205,49 +205,8 @@ namespace MediaRipperEncoder.Services
                 return; // ad-hoc encode with no library target — leave it where it is.
             }
 
-            // Stamp the embedded Title tag (e.g. "Solo Leveling - S01E009 (Episode Name)") so VLC
-            // and Explorer show the show + episode instead of MakeMKV's disc label. Computed when
-            // the job was built (carries original punctuation + show-name prefix); falls back to the
-            // file name for older/ad-hoc jobs. Done on the staged file before it's moved.
-            string embeddedTitle = string.IsNullOrEmpty(job.EmbeddedTitle)
-                ? MediaTagWriter.TitleFromFileName(job.FinalTargetPath)
-                : job.EmbeddedTitle;
-            MediaTagWriter.SetTitle(job.OutputFile, embeddedTitle);
-
-            var target = new LibraryTarget
-            {
-                Folder = Path.GetDirectoryName(job.FinalTargetPath),
-                FileName = Path.GetFileName(job.FinalTargetPath),
-                FullPath = job.FinalTargetPath
-            };
-
-            PlacementPlan plan = LibraryPlacer.Plan(job.OutputFile, target);
-
-            ConflictResolution resolution = ConflictResolution.KeepBoth;
-            if (plan.TargetExists)
-            {
-                Func<PlacementPlan, ConflictResolution> resolver = ResolveConflict;
-                resolution = resolver != null ? resolver(plan) : ConflictResolution.KeepBoth;
-            }
-
-            PlacementResult result = LibraryPlacer.Commit(plan, resolution);
-
-            // NOTE: we deliberately leave job.OutputFile pointing at the staging path so a later
-            // "Re-encode" re-stages and goes back through this overwrite-protected placement,
-            // rather than writing straight into the library. The final location is reported via
-            // CurrentOperation instead.
-            if (result.Outcome == PlacementOutcome.Skipped)
-            {
-                job.CurrentOperation = "Kept existing library file (skipped).";
-            }
-            else if (result.Outcome == PlacementOutcome.Failed)
-            {
-                job.CurrentOperation = "Encoded OK, but placing into the library FAILED.";
-            }
-            else
-            {
-                job.CurrentOperation = "Placed -> " + result.FinalPath;
-            }
+            // Shared tag-and-place step (same one the remote encoder server uses).
+            PlacementResult result = EncodeFinisher.FinishAndPlace(job, ResolveConflict);
 
             Action<EncodeJob, PlacementResult> handler = FilePlaced;
             if (handler != null) { handler(job, result); }
