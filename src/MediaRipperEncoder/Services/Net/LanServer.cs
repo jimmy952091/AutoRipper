@@ -19,6 +19,7 @@ namespace MediaRipperEncoder.Services.Net
     {
         private readonly string _serverName;
         private readonly string _sessionId;
+        private readonly string _sharedSecret;
         private TcpListener _listener;
         private Thread _acceptThread;
         private volatile bool _running;
@@ -30,11 +31,12 @@ namespace MediaRipperEncoder.Services.Net
         public event Action<string> ClientConnected;
         public event Action<string> ClientDisconnected;
 
-        public LanServer(string serverName, string sessionId)
+        public LanServer(string serverName, string sessionId, string sharedSecret)
         {
             _serverName = string.IsNullOrWhiteSpace(serverName) ? Environment.MachineName : serverName;
             // A stable session id lets a client that reconnects prove it's rejoining the same session.
             _sessionId = string.IsNullOrWhiteSpace(sessionId) ? Guid.NewGuid().ToString("N") : sessionId;
+            _sharedSecret = sharedSecret ?? "";
         }
 
         public string SessionId { get { return _sessionId; } }
@@ -43,6 +45,15 @@ namespace MediaRipperEncoder.Services.Net
         public void Start(int port)
         {
             if (_running) { return; }
+
+            // Fail safe: never listen without a shared secret, which would accept any connection.
+            if (string.IsNullOrEmpty(_sharedSecret))
+            {
+                throw new InvalidOperationException(
+                    "Refusing to start the encoder server without a shared secret. Set one on the " +
+                    "Advanced settings tab (the same value on both machines).");
+            }
+
             _running = true;
 
             _listener = new TcpListener(IPAddress.Any, port);
@@ -81,15 +92,31 @@ namespace MediaRipperEncoder.Services.Net
             using (client)
             using (var conn = new PeerConnection(client))
             {
-                // Expect HELLO first; reply HELLO_ACK with our identity + the session id.
+                // Expect HELLO first.
                 NetMessage hello = conn.Read();
                 if (hello == null || hello.Type != MsgType.Hello)
                 {
                     Logger.Error("LanServer: first message was not HELLO; dropping connection.");
                     return;
                 }
-
                 string clientName = hello.GetString("name");
+
+                // Shared-secret gate BEFORE anything else: challenge with a random nonce and require
+                // a valid HMAC proof. A scanner/unauthorized peer is dropped here, having learned
+                // nothing and been able to do nothing.
+                string nonce = NodeAuth.GenerateNonce();
+                conn.Write(new NetMessage(MsgType.AuthChallenge).With("nonce", nonce));
+
+                NetMessage authResp = conn.Read();
+                string proof = authResp != null ? authResp.GetString("proof") : "";
+                if (authResp == null || authResp.Type != MsgType.AuthResponse ||
+                    !NodeAuth.VerifyProof(_sharedSecret, nonce, proof))
+                {
+                    Logger.Error("LanServer: auth FAILED for '" + clientName + "' — wrong/absent shared secret. Dropping.");
+                    try { conn.Write(new NetMessage(MsgType.AuthFail)); } catch { /* peer may already be gone */ }
+                    return;
+                }
+
                 conn.Write(new NetMessage(MsgType.HelloAck)
                     .With("server", _serverName)
                     .With("session", _sessionId));

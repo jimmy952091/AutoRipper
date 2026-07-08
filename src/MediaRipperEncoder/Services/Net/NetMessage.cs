@@ -13,6 +13,9 @@ namespace MediaRipperEncoder.Services.Net
     {
         // Handshake / liveness
         public const string Hello = "HELLO";              // client -> server: I am a ripper client (name, version)
+        public const string AuthChallenge = "AUTH_CHALLENGE"; // server -> client: prove you hold the shared secret (nonce)
+        public const string AuthResponse = "AUTH_RESPONSE";   // client -> server: HMAC(secret, nonce) as hex
+        public const string AuthFail = "AUTH_FAIL";        // server -> client: bad/absent proof; connection will close
         public const string HelloAck = "HELLO_ACK";       // server -> client: accepted (server name, version, session id)
         public const string Heartbeat = "HEARTBEAT";      // both ways: keep-alive / detect a dropped peer
         public const string Rejoin = "REJOIN";            // client -> server: reconnecting, here's the session id I had

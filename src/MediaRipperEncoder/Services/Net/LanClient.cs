@@ -12,6 +12,7 @@ namespace MediaRipperEncoder.Services.Net
     public class LanClient : IDisposable
     {
         private readonly string _clientName;
+        private readonly string _sharedSecret;
         private TcpClient _tcp;
         private PeerConnection _conn;
 
@@ -22,9 +23,10 @@ namespace MediaRipperEncoder.Services.Net
         /// <summary>The live connection, for streaming files (see <see cref="FileTransfer"/>). Null until connected.</summary>
         public PeerConnection Connection { get { return _conn; } }
 
-        public LanClient(string clientName)
+        public LanClient(string clientName, string sharedSecret)
         {
             _clientName = string.IsNullOrWhiteSpace(clientName) ? Environment.MachineName : clientName;
+            _sharedSecret = sharedSecret ?? "";
         }
 
         /// <summary>
@@ -53,7 +55,25 @@ namespace MediaRipperEncoder.Services.Net
                     .With("name", _clientName)
                     .With("version", "1"));
 
+                // Answer the server's shared-secret challenge (HMAC of its nonce). The secret never
+                // goes on the wire — only the proof does.
+                NetMessage challenge = _conn.Read();
+                if (challenge == null || challenge.Type != MsgType.AuthChallenge)
+                {
+                    Logger.Error("LanClient: expected AUTH_CHALLENGE from server.");
+                    Dispose();
+                    return false;
+                }
+                string proof = NodeAuth.ComputeProof(_sharedSecret, challenge.GetString("nonce"));
+                _conn.Write(new NetMessage(MsgType.AuthResponse).With("proof", proof));
+
                 NetMessage ack = _conn.Read();
+                if (ack != null && ack.Type == MsgType.AuthFail)
+                {
+                    Logger.Error("LanClient: server rejected our shared secret. Check both machines use the same value.");
+                    Dispose();
+                    return false;
+                }
                 if (ack == null || ack.Type != MsgType.HelloAck)
                 {
                     Logger.Error("LanClient: server did not return HELLO_ACK.");

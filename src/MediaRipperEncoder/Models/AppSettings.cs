@@ -103,6 +103,14 @@ namespace MediaRipperEncoder.Models
         /// <summary>Host/IP of the encoder server, used by a RipperClient to connect. Blank if Standalone/Server.</summary>
         public string NodeServerHost { get; set; }
 
+        /// <summary>
+        /// Shared secret both nodes must hold to talk. Used for an HMAC challenge-response at connect
+        /// time so the secret itself never crosses the wire and a random port-scanner is rejected at
+        /// the handshake. The server REFUSES TO START with a blank secret (fail safe, never wide open).
+        /// Not real transport encryption — a "don't expose this port to the internet" LAN gate.
+        /// </summary>
+        public string NodeSharedSecret { get; set; }
+
         public AppSettings()
         {
             // Sensible defaults for a brand-new install.
@@ -127,6 +135,7 @@ namespace MediaRipperEncoder.Models
             NodeRole = NodeRole.Standalone;
             NodePort = 47820; // arbitrary high port for the LAN encode session
             NodeServerHost = "";
+            NodeSharedSecret = "";
         }
     }
 }
