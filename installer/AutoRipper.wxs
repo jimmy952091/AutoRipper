@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AutoRipper MSI (WiX v6). Build with installer\build-installer.ps1.
+
+  Design requirements (from the project spec + memory notes):
+   - True MSI so admins can script deployment: msiexec /i AutoRipper-x64.msi /qn
+   - Fully OFFLINE: everything is embedded; nothing is fetched at install time.
+   - Requires .NET Framework 4.8 (NOT 4.8.1 — unsupported on Windows Server 2019):
+     registry Release >= 528040, checked as a launch condition. The refusal message
+     names the OFFLINE .NET installer and where to get it, because a server OS
+     often has no working Windows Update (message must not assume a desktop OS).
+   - External tools (MakeMKV, HandBrakeCLI, fre:ac) are user-supplied and NEVER bundled.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <!-- UpgradeCode is AutoRipper's permanent identity across all versions — never change it,
+       or upgrades will install side-by-side instead of replacing. -->
+  <Package Name="AutoRipper"
+           Manufacturer="James Spurgeon"
+           Version="0.1.0"
+           UpgradeCode="6E1B9A47-3C52-4B7A-9D8E-2F0A61C4D513"
+           Language="1033"
+           Scope="perMachine"
+           Compressed="yes">
+
+    <SummaryInformation Description="AutoRipper — automated disc ripping and encoding for Plex, Jellyfin, and other media servers." />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of AutoRipper is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- .NET Framework 4.8 gate. NETFRAMEWORK45 holds the raw Release DWORD ("#528040" = 4.8).
+         Lexicographic compare is safe: every relevant Release value is six digits. -->
+    <PropertyRef Id="NETFRAMEWORK45" />
+    <Launch Condition="Installed OR NETFRAMEWORK45 &gt;= &quot;#528040&quot;"
+            Message="AutoRipper requires the .NET Framework 4.8 runtime, which is not installed on this machine.&#13;&#10;&#13;&#10;Download the OFFLINE installer (ndp48-x86-x64-allos-enu.exe) from:&#13;&#10;https://dotnet.microsoft.com/download/dotnet-framework/net48&#13;&#10;&#13;&#10;The offline installer works on desktop and server editions (Windows 7 SP1 through Server 2022) without needing Windows Update. Install it, then run this setup again." />
+
+    <!-- Application files. -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="AutoRipper">
+        <Component Id="MainExecutable">
+          <File Id="AutoRipperExe" Source="$(var.PublishDir)\MediaRipperEncoder.exe" KeyPath="yes" />
+        </Component>
+        <Component Id="ExeConfig">
+          <File Source="$(var.PublishDir)\MediaRipperEncoder.exe.config" />
+        </Component>
+        <Component Id="NewtonsoftJson">
+          <File Source="$(var.PublishDir)\Newtonsoft.Json.dll" />
+        </Component>
+        <Component Id="TagLibSharp">
+          <File Source="$(var.PublishDir)\TagLibSharp.dll" />
+        </Component>
+        <Component Id="LicenseFile">
+          <!-- The AGPL text must travel with the program (also shown in Help > About). -->
+          <File Source="$(var.PublishDir)\LICENSE" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <!-- Start Menu shortcut. -->
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppMenuFolder" Name="AutoRipper">
+        <Component Id="StartMenuShortcut">
+          <Shortcut Id="AppShortcut"
+                    Name="AutoRipper"
+                    Description="Automated disc ripping and encoding for media servers"
+                    Target="[INSTALLFOLDER]MediaRipperEncoder.exe"
+                    WorkingDirectory="INSTALLFOLDER" />
+          <RemoveFolder Id="RemoveAppMenuFolder" Directory="AppMenuFolder" On="uninstall" />
+          <!-- Shortcuts can't be a component KeyPath; a per-user registry marker is the standard pattern. -->
+          <RegistryValue Root="HKCU" Key="Software\MediaRipperEncoder" Name="StartMenuShortcut"
+                         Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+  </Package>
+</Wix>
