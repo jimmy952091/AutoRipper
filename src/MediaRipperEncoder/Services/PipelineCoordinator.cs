@@ -32,6 +32,20 @@ namespace MediaRipperEncoder.Services
         // encoded on another machine is named + placed identically).
         private readonly EncodeJobPlanner _planner;
 
+        // RipperClient role only: hands ripped files to the encoder server instead of the local
+        // encode queue. Null in Standalone/EncoderServer roles. Each remote job gets a local
+        // "shadow" EncodeJob so it shows in the same encode list, updated from the client's events.
+        private readonly Services.Net.RemoteEncodeClient _remote;
+        private readonly System.Collections.Generic.Dictionary<string, EncodeJob> _remoteShadows =
+            new System.Collections.Generic.Dictionary<string, EncodeJob>();
+        private readonly object _shadowLock = new object();
+
+        /// <summary>True when this instance offloads encoding to a remote server (RipperClient role).</summary>
+        public bool IsRemoteRipper { get { return _remote != null; } }
+
+        /// <summary>Remote encoder connection state changed (RipperClient role). Background thread.</summary>
+        public event Action<bool> RemoteConnectionChanged;
+
         /// <summary>Rip job status/progress changed (fires on a background thread).</summary>
         public event Action<RipJob> RipJobUpdated;
 
@@ -73,6 +87,22 @@ namespace MediaRipperEncoder.Services
             _ripQueue.ManualDiscChangeRequested += j => { var h = ManualDiscChangeRequested; if (h != null) h(j); };
             _encodeQueue.JobUpdated += j => { var h = EncodeJobUpdated; if (h != null) h(j); };
             _encodeQueue.JobEncodedSuccessfully += OnEncodeDone;
+
+            // RipperClient: stand up the remote encoder link. Requires a server host + shared
+            // secret; without them we stay local (and the UI surfaces that it's misconfigured).
+            if (settings.NodeRole == NodeRole.RipperClient &&
+                !string.IsNullOrWhiteSpace(settings.NodeServerHost) &&
+                !string.IsNullOrWhiteSpace(settings.NodeSharedSecret))
+            {
+                _remote = new Services.Net.RemoteEncodeClient(
+                    settings.NodeServerHost, settings.NodePort, settings.NodeSharedSecret, Environment.MachineName);
+                _remote.ConnectionChanged += up => { var h = RemoteConnectionChanged; if (h != null) h(up); };
+                _remote.JobStatusChanged += OnRemoteJobStatus;
+                _remote.UploadProgress += OnRemoteUploadProgress;
+                _remote.Start();
+                Logger.Info("PipelineCoordinator: RipperClient mode — encoding offloaded to " +
+                            settings.NodeServerHost + ":" + settings.NodePort + ".");
+            }
         }
 
         /// <summary>Exposed so the UI can run a disc scan through the same MakeMKV service.</summary>
@@ -184,16 +214,106 @@ namespace MediaRipperEncoder.Services
             foreach (string mkv in job.OutputFiles)
             {
                 int titleIndex = ParseTitleIndex(mkv);
-                EncodeJob ej = _planner.BuildEncodeJob(meta, mkv, titleIndex);
-                if (ej != null)
+
+                // Unmapped titles (unchecked extras / duplicate play-all) are skipped in BOTH modes.
+                LibraryTarget target = _planner.BuildTargetFor(meta, titleIndex);
+                if (target == null)
                 {
-                    _encodeQueue.Enqueue(ej); // FIFO: appended to the back.
+                    Logger.Info("Skipping ripped file (no episode/feature mapping): " + mkv);
+                    continue;
+                }
+
+                if (_remote != null)
+                {
+                    SubmitToRemote(meta, mkv, titleIndex, target.FileName);
                 }
                 else
                 {
-                    Logger.Info("Skipping ripped file (no episode/feature mapping): " + mkv);
+                    _encodeQueue.Enqueue(_planner.BuildEncodeJob(meta, mkv, titleIndex)); // FIFO local encode.
                 }
             }
+        }
+
+        // ---------------- RipperClient: offload to the encoder server ----------------
+
+        private void SubmitToRemote(MediaMetadata meta, string mkv, int titleIndex, string displayName)
+        {
+            long size = 0;
+            try { size = new FileInfo(mkv).Length; } catch { /* best-effort */ }
+
+            string clientJobId = Guid.NewGuid().ToString("N").Substring(0, 12);
+
+            // Shadow job so the remote work shows in the same encode list the local mode uses.
+            var shadow = new EncodeJob
+            {
+                InputFile = mkv,
+                DisplayName = displayName,
+                TitleIndex = titleIndex,
+                Status = EncodeStatus.Queued,
+                CurrentOperation = "Queued for remote encode"
+            };
+            lock (_shadowLock) { _remoteShadows[clientJobId] = shadow; }
+            RaiseEncode(shadow);
+
+            var request = new Services.Net.RemoteEncodeRequest
+            {
+                Metadata = meta,
+                TitleIndex = titleIndex,
+                UseAnimationPreset = _planner.IsAnimationChoice(meta),
+                SourceFileName = Path.GetFileName(mkv),
+                FileSize = size,
+                ClientJobId = clientJobId
+            };
+            _remote.SubmitJob(request, mkv);
+        }
+
+        private void OnRemoteUploadProgress(string clientJobId, long sent, long total)
+        {
+            EncodeJob shadow = Shadow(clientJobId);
+            if (shadow == null) { return; }
+            int pct = total > 0 ? (int)(sent * 100 / total) : 0;
+            shadow.Status = EncodeStatus.Encoding; // "in flight" from the user's view
+            shadow.ProgressPercent = 0;            // encode % is separate; don't fake it during upload
+            shadow.CurrentOperation = "Uploading to server… " + pct + "%";
+            RaiseEncode(shadow);
+        }
+
+        private void OnRemoteJobStatus(Services.Net.RemoteJobStatus s)
+        {
+            EncodeJob shadow = Shadow(s.ClientJobId);
+            if (shadow == null) { return; }
+
+            EncodeStatus status;
+            if (!Enum.TryParse(s.Status, out status)) { status = EncodeStatus.Encoding; }
+            shadow.Status = status;
+            shadow.ProgressPercent = s.Percent;
+
+            if (s.Done)
+            {
+                shadow.CurrentOperation = s.Ok
+                    ? "Encoded on server → " + s.FinalPath
+                    : "Server error: " + s.Error;
+                if (!s.Ok) { shadow.Error = s.Error; }
+            }
+            else
+            {
+                shadow.CurrentOperation = string.IsNullOrEmpty(s.Operation) ? "Encoding on server…" : s.Operation;
+            }
+            RaiseEncode(shadow);
+        }
+
+        private EncodeJob Shadow(string clientJobId)
+        {
+            lock (_shadowLock)
+            {
+                EncodeJob j;
+                return _remoteShadows.TryGetValue(clientJobId ?? "", out j) ? j : null;
+            }
+        }
+
+        private void RaiseEncode(EncodeJob job)
+        {
+            var h = EncodeJobUpdated; if (h != null) { h(job); }
         }
 
         // ---------------- encode -> placement ----------------
@@ -309,6 +429,7 @@ namespace MediaRipperEncoder.Services
 
         public void Dispose()
         {
+            if (_remote != null) { _remote.Dispose(); }
             _ripQueue.Dispose();
             _encodeQueue.Dispose();
         }

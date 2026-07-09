@@ -83,6 +83,17 @@ namespace MediaRipperEncoder.Services
             };
         }
 
+        /// <summary>
+        /// Whether this disc's chosen preset is the animation one — the flag a RipperClient sends
+        /// so the server picks the matching preset. Assumes both nodes name their presets the same
+        /// (the user exports the same preset files to each machine, which is how they're set up).
+        /// </summary>
+        public bool IsAnimationChoice(MediaMetadata meta)
+        {
+            return !string.IsNullOrEmpty(_animationPresetName) && meta != null &&
+                   string.Equals(meta.PresetName, _animationPresetName, StringComparison.Ordinal);
+        }
+
         public LibraryTarget BuildTargetFor(MediaMetadata meta, int titleIndex)
         {
             if (meta.MediaType == MediaType.Movie)
