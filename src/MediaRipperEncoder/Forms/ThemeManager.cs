@@ -112,7 +112,17 @@ namespace MediaRipperEncoder.Forms
                 ((LinkLabel)c).LinkColor = LinkColor;
                 c.BackColor = Color.Transparent;
             }
-            else if (c is TextBox || c is ComboBox || c is NumericUpDown || c is ListBox || c is ListView)
+            else if (c is ListView)
+            {
+                c.BackColor = FieldBack;
+                c.ForeColor = Text;
+                // Group HEADER text is painted by Windows with a theme accent that ignores
+                // ForeColor — unreadable on a dark background. Asking for Explorer's own dark
+                // variant makes Windows paint headers/scrollbars/selection in dark-appropriate
+                // colors (Win10 1809+; silently a no-op on Win7/8 and under Wine).
+                TrySetWindowTheme(c, IsDark ? "DarkMode_Explorer" : "Explorer");
+            }
+            else if (c is TextBox || c is ComboBox || c is NumericUpDown || c is ListBox)
             {
                 c.BackColor = FieldBack;
                 c.ForeColor = Text;
@@ -157,6 +167,16 @@ namespace MediaRipperEncoder.Forms
             var menuItem = item as ToolStripMenuItem;
             if (menuItem == null) { return; }
             foreach (ToolStripItem child in menuItem.DropDownItems) { ApplyMenuItem(child); }
+        }
+
+        [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
+        private static extern int SetWindowTheme(IntPtr hWnd, string appName, string idList);
+
+        private static void TrySetWindowTheme(Control c, string theme)
+        {
+            if (!c.IsHandleCreated) { return; }
+            try { SetWindowTheme(c.Handle, theme, null); }
+            catch { /* pre-Vista/Wine stub — control just keeps its default look */ }
         }
 
         // ---- dark title bar (Windows 10 1809+; harmless no-op elsewhere) ----
