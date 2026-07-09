@@ -87,6 +87,20 @@ namespace MediaRipperEncoder.Forms.Controls
             if (IsHandleCreated) { ApplyGroupState(group, collapsed); }
         }
 
+        /// <summary>
+        /// Re-applies the native collapsible/collapsed state for a group we already track. Call
+        /// this after changing a group's Header text: WinForms re-sends the group to the OS on a
+        /// header change WITHOUT the collapsible flag, which silently disables the chevron on the
+        /// disc that's still ripping (its header updates as the operation changes). Preserves the
+        /// current folded/expanded choice. No-op for groups we were never asked to make collapsible.
+        /// </summary>
+        public void RefreshGroupState(ListViewGroup group)
+        {
+            bool collapsed;
+            if (group == null || !_groupCollapsed.TryGetValue(group, out collapsed)) { return; }
+            if (IsHandleCreated) { ApplyGroupState(group, collapsed); }
+        }
+
         private void ApplyGroupState(ListViewGroup group, bool collapsed)
         {
             int groupId = GetNativeGroupId(group);
