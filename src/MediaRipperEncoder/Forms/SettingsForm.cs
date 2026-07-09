@@ -27,6 +27,12 @@ namespace MediaRipperEncoder.Forms
         private TextBox _networkRipSource;
         private CheckBox _networkRipSearchSubfolders;
 
+        // Advanced tab: distributed encoding (LAN rip/encode split).
+        private ComboBox _nodeRole;
+        private TextBox _nodeHost;
+        private NumericUpDown _nodePort;
+        private TextBox _nodeSecret;
+
         public SettingsForm(AppSettings settings)
         {
             _settings = settings;
@@ -152,6 +158,89 @@ namespace MediaRipperEncoder.Forms
             panel.Controls.Add(browse);
             panel.Controls.Add(_networkRipSearchSubfolders);
             panel.Controls.Add(subBlurb);
+
+            // ---- Distributed encoding (rip on one PC, encode on another) ----
+            var divider = new Label { BorderStyle = BorderStyle.Fixed3D, Location = new Point(14, 280), Size = new Size(680, 2), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+
+            var netHeading = new Label
+            {
+                Text = "Distributed encoding (LAN only)",
+                Font = new Font(Font, FontStyle.Bold),
+                AutoSize = true,
+                Location = new Point(14, 294)
+            };
+
+            var netBlurb = new Label
+            {
+                Text = "Optionally split the work across two machines on your LAN: a Client Node rips discs and " +
+                       "hands each file to a Server Node that encodes it. Both machines must share the same " +
+                       "secret below (it authenticates the connection; it never crosses the network in the clear). " +
+                       "This traffic is NOT encrypted — keep it on your LAN and do not forward the port to the " +
+                       "internet (use a VPN for remote access). Leave the role on Standalone for single-PC use.",
+                AutoSize = false,
+                Location = new Point(14, 318),
+                Size = new Size(680, 62)
+            };
+
+            var roleLabel = new Label { Text = "This machine's role:", AutoSize = true, Location = new Point(14, 388) };
+            _nodeRole = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Location = new Point(150, 384),
+                Size = new Size(300, 23)
+            };
+            // Order MUST match the NodeRole enum (Standalone=0, EncoderServer=1, RipperClient=2).
+            _nodeRole.Items.AddRange(new object[]
+            {
+                "Standalone (rip + encode on this PC)",
+                "Server Node — encoder (receives rips to encode)",
+                "Client Node — ripper (sends rips to the server)"
+            });
+            _nodeRole.SelectedIndex = (int)settings.NodeRole;
+
+            var hostLabel = new Label { Text = "Encoder server host (Client Node only):", AutoSize = true, Location = new Point(14, 420) };
+            _nodeHost = new TextBox
+            {
+                Location = new Point(300, 417),
+                Size = new Size(240, 23),
+                Text = settings.NodeServerHost ?? "",
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+
+            var portLabel = new Label { Text = "Port (both nodes must match):", AutoSize = true, Location = new Point(14, 452) };
+            _nodePort = new NumericUpDown
+            {
+                Location = new Point(300, 449),
+                Size = new Size(90, 23),
+                Minimum = 1024,
+                Maximum = 65535,
+                Value = settings.NodePort >= 1024 && settings.NodePort <= 65535 ? settings.NodePort : 47820
+            };
+
+            var secretLabel = new Label { Text = "Shared secret (identical on both nodes):", AutoSize = true, Location = new Point(14, 484) };
+            _nodeSecret = new TextBox
+            {
+                Location = new Point(300, 481),
+                Size = new Size(240, 23),
+                Text = settings.NodeSharedSecret ?? "",
+                UseSystemPasswordChar = true,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+            var showSecret = new CheckBox { Text = "Show", AutoSize = true, Location = new Point(550, 483), Anchor = AnchorStyles.Top | AnchorStyles.Right };
+            showSecret.CheckedChanged += (s, e) => _nodeSecret.UseSystemPasswordChar = !showSecret.Checked;
+
+            panel.Controls.Add(divider);
+            panel.Controls.Add(netHeading);
+            panel.Controls.Add(netBlurb);
+            panel.Controls.Add(roleLabel);
+            panel.Controls.Add(_nodeRole);
+            panel.Controls.Add(hostLabel);
+            panel.Controls.Add(_nodeHost);
+            panel.Controls.Add(portLabel);
+            panel.Controls.Add(_nodePort);
+            panel.Controls.Add(secretLabel);
+            panel.Controls.Add(_nodeSecret);
+            panel.Controls.Add(showSecret);
             return panel;
         }
 
@@ -194,6 +283,21 @@ namespace MediaRipperEncoder.Forms
             _settings.NetworkRipEnabled = _networkRipEnabled.Checked;
             _settings.NetworkRipSource = (_networkRipSource.Text ?? "").Trim();
             _settings.NetworkRipSearchSubfolders = _networkRipSearchSubfolders.Checked;
+
+            NodeRole priorRole = _settings.NodeRole;
+            _settings.NodeRole = (NodeRole)_nodeRole.SelectedIndex;
+            _settings.NodeServerHost = (_nodeHost.Text ?? "").Trim();
+            _settings.NodePort = (int)_nodePort.Value;
+            _settings.NodeSharedSecret = (_nodeSecret.Text ?? "").Trim();
+
+            // The node role/server wiring is set up once when the main window opens, so a change
+            // here only takes effect next launch. Tell the user rather than leaving them puzzled.
+            if (_settings.NodeRole != priorRole)
+            {
+                MessageBox.Show(this,
+                    "The node role change will take effect the next time you start AutoRipper.",
+                    "Restart needed", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
 
             bool ok = _editor.RunFullValidation();
             if (!ok)
