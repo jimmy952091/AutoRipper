@@ -499,6 +499,11 @@ namespace MediaRipperEncoder.Forms
             _ripList.Groups.Add(group);
             _ripGroups[job.Id] = group;
 
+            // Excel-style fold: give the disc's header row a native ▲/▼ chevron right away, so the
+            // user can collapse any disc's titles into its header line at will. Finished discs are
+            // auto-collapsed in OnRipJobUpdated.
+            _ripList.SetGroupCollapsed(group, false);
+
             if (job.TitleResults == null || job.TitleResults.Count == 0)
             {
                 // "All titles" jobs have no per-title breakdown; show a single aggregate row.
@@ -541,6 +546,15 @@ namespace MediaRipperEncoder.Forms
                     // not the percentage), so this update is now infrequent.
                     string header = job.DiscLabel + "  —  " + job.CurrentOperation;
                     if (group.Header != header) { group.Header = header; }
+
+                    // A disc that finished with every title successful folds up into its header
+                    // line (Excel-style), so completed discs stop taking vertical space. A disc
+                    // with failures stays expanded — the red rows need to be visible for
+                    // "Retry failed title(s)".
+                    if (job.Status == RipStatus.Completed && AllTitleRowsCompleted(group))
+                    {
+                        _ripList.SetGroupCollapsed(group, true);
+                    }
                 }
                 if (job.Status == RipStatus.Ripping || job.Status == RipStatus.Completed)
                 {
@@ -549,19 +563,39 @@ namespace MediaRipperEncoder.Forms
             });
         }
 
+        /// <summary>True when every title row in the disc's group shows Completed.</summary>
+        private static bool AllTitleRowsCompleted(ListViewGroup group)
+        {
+            foreach (ListViewItem item in group.Items)
+            {
+                if (item.SubItems[1].Text != RipStatus.Completed.ToString()) { return false; }
+            }
+            return group.Items.Count > 0;
+        }
+
         private void OnRipTitleUpdated(RipJob job, RipTitleResult tr)
         {
             UI(() =>
             {
                 ListViewItem item;
                 if (!_ripTitleRows.TryGetValue(RipRowKey(job.Id, tr.TitleIndex), out item)) { return; }
-                item.SubItems[1].Text = tr.Status.ToString();
-                item.SubItems[2].Text = FormatProgress(tr.ProgressPercent, "");
-                item.ForeColor =
+
+                // Assign only what actually changed: rewriting a cell (even with identical text)
+                // invalidates and repaints it, and doing that for every row on every progress tick
+                // is what made the rip side flash. With these guards a typical tick repaints just
+                // the one Progress cell that moved.
+                string status = tr.Status.ToString();
+                string progress = FormatProgress(tr.ProgressPercent, "");
+                Color color =
                     tr.Status == RipStatus.Failed ? Color.FromArgb(180, 0, 0) :
                     tr.Status == RipStatus.Completed ? Color.FromArgb(0, 110, 0) :
                     SystemColors.WindowText;
-                item.ToolTipText = tr.Status == RipStatus.Failed ? tr.Error : "";
+                string tip = tr.Status == RipStatus.Failed ? tr.Error : "";
+
+                if (item.SubItems[1].Text != status) { item.SubItems[1].Text = status; }
+                if (item.SubItems[2].Text != progress) { item.SubItems[2].Text = progress; }
+                if (item.ForeColor != color) { item.ForeColor = color; }
+                if (item.ToolTipText != tip) { item.ToolTipText = tip; }
             });
         }
 
