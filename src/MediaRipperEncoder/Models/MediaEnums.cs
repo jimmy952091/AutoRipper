@@ -24,6 +24,18 @@ namespace MediaRipperEncoder.Models
     }
 
     /// <summary>
+    /// UI theme choice. System follows the Windows "app mode" setting (light on Windows 7/8,
+    /// which has no such setting). Values are stable — they're persisted in settings.json and
+    /// map to the Appearance dropdown by index.
+    /// </summary>
+    public enum ThemePreference
+    {
+        System = 0,
+        Light = 1,
+        Dark = 2
+    }
+
+    /// <summary>
     /// Which episode-ordering scheme to pull from TheTVDB. Physical box sets are frequently in
     /// DVD order, which differs from broadcast (aired) order — matching the disc's order to the
     /// printed episode booklet is what keeps episodes correctly named.

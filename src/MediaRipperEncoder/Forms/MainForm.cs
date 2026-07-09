@@ -186,6 +186,13 @@ namespace MediaRipperEncoder.Forms
             var fileMenu = new ToolStripMenuItem("&File");
             fileMenu.DropDownItems.Add(new ToolStripMenuItem("E&xit", null, (s, e) => Close()));
 
+            // Edit > ES Connection > Edit connection... — quick access to the encoder-server
+            // session settings without digging into Settings > Advanced.
+            var editMenu = new ToolStripMenuItem("&Edit");
+            var esConnection = new ToolStripMenuItem("ES &Connection");
+            esConnection.DropDownItems.Add(new ToolStripMenuItem("&Edit connection...", null, OnEditConnection));
+            editMenu.DropDownItems.Add(esConnection);
+
             var toolsMenu = new ToolStripMenuItem("&Tools");
             toolsMenu.DropDownItems.Add(new ToolStripMenuItem("&Settings...", null, OnSettingsClicked));
 
@@ -202,10 +209,24 @@ namespace MediaRipperEncoder.Forms
             helpMenu.DropDownItems.Add(new ToolStripMenuItem("&About AutoRipper...", null, OnAboutClicked));
 
             menu.Items.Add(fileMenu);
+            menu.Items.Add(editMenu);
             menu.Items.Add(toolsMenu);
             menu.Items.Add(helpMenu);
             MainMenuStrip = menu;
             Controls.Add(menu);
+        }
+
+        private void OnEditConnection(object sender, EventArgs e)
+        {
+            using (var dialog = new ConnectionDialog(_settings))
+            {
+                if (dialog.ShowDialog(this) == DialogResult.OK)
+                {
+                    // Dialog saved to disk; reload the authoritative copy. The live session keeps
+                    // its current wiring until restart (the dialog told the user so).
+                    _settings = SettingsStore.Load();
+                }
+            }
         }
 
         private void OnAboutClicked(object sender, EventArgs e)
@@ -244,7 +265,7 @@ namespace MediaRipperEncoder.Forms
                 AutoSize = false,
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleLeft,
-                ForeColor = Color.FromArgb(0, 100, 0)
+                ForeColor = ThemeManager.Ok
             };
             root.Controls.Add(_statusStrip, 0, 3);
 
@@ -404,12 +425,12 @@ namespace MediaRipperEncoder.Forms
             if (HasMetadataKeys())
             {
                 _providerModeLabel.Text = "Metadata lookups: LIVE (using your saved API keys).";
-                _providerModeLabel.ForeColor = Color.FromArgb(0, 110, 0);
+                _providerModeLabel.ForeColor = ThemeManager.Ok;
             }
             else
             {
                 _providerModeLabel.Text = "Metadata lookups: TEST DATA ONLY (no API keys saved — add them in Tools > Settings).";
-                _providerModeLabel.ForeColor = Color.FromArgb(176, 96, 0);
+                _providerModeLabel.ForeColor = ThemeManager.Warn;
             }
         }
 
@@ -636,9 +657,9 @@ namespace MediaRipperEncoder.Forms
                 string status = tr.Status.ToString();
                 string progress = FormatProgress(tr.ProgressPercent, "");
                 Color color =
-                    tr.Status == RipStatus.Failed ? Color.FromArgb(180, 0, 0) :
-                    tr.Status == RipStatus.Completed ? Color.FromArgb(0, 110, 0) :
-                    SystemColors.WindowText;
+                    tr.Status == RipStatus.Failed ? ThemeManager.Bad :
+                    tr.Status == RipStatus.Completed ? ThemeManager.Ok :
+                    ThemeManager.Text;
                 string tip = tr.Status == RipStatus.Failed ? tr.Error : "";
 
                 if (item.SubItems[1].Text != status) { item.SubItems[1].Text = status; }
@@ -938,13 +959,13 @@ namespace MediaRipperEncoder.Forms
         private void SetDriveStatus(string text, bool isProblem)
         {
             _driveStatus.Text = text;
-            _driveStatus.ForeColor = isProblem ? Color.FromArgb(180, 0, 0) : Color.FromArgb(0, 100, 0);
+            _driveStatus.ForeColor = isProblem ? ThemeManager.Bad : ThemeManager.Ok;
         }
 
         private void SetStatus(string text, bool isProblem)
         {
             _statusStrip.Text = text;
-            _statusStrip.ForeColor = isProblem ? Color.FromArgb(180, 0, 0) : Color.FromArgb(0, 100, 0);
+            _statusStrip.ForeColor = isProblem ? ThemeManager.Bad : ThemeManager.Ok;
         }
 
         /// <summary>Runs an action on the UI thread; safe to call from background events.</summary>

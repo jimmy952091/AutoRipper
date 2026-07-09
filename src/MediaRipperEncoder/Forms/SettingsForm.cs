@@ -33,6 +33,9 @@ namespace MediaRipperEncoder.Forms
         private NumericUpDown _nodePort;
         private TextBox _nodeSecret;
 
+        // Appearance tab.
+        private ComboBox _themeCombo;
+
         public SettingsForm(AppSettings settings)
         {
             _settings = settings;
@@ -68,17 +71,68 @@ namespace MediaRipperEncoder.Forms
             content.Controls.Add(_editor);
             generalTab.Controls.Add(content);
 
+            // --- Appearance tab: theme ---
+            var appearanceTab = new TabPage("Appearance");
+            appearanceTab.Controls.Add(BuildAppearancePanel(settings));
+
             // --- Advanced tab: network / mapped-drive rip source ---
             var advancedTab = new TabPage("Advanced");
             advancedTab.Controls.Add(BuildAdvancedPanel(settings));
 
             tabs.TabPages.Add(generalTab);
+            tabs.TabPages.Add(appearanceTab);
             tabs.TabPages.Add(advancedTab);
 
             layout.Controls.Add(tabs, 0, 0);
             layout.Controls.Add(BuildButtonBar(), 0, 1);
 
             Controls.Add(layout);
+        }
+
+        private Control BuildAppearancePanel(AppSettings settings)
+        {
+            var panel = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(14) };
+
+            var heading = new Label
+            {
+                Text = "Theme",
+                Font = new Font(Font, FontStyle.Bold),
+                AutoSize = true,
+                Location = new Point(14, 14)
+            };
+
+            var themeLabel = new Label { Text = "Window theme:", AutoSize = true, Location = new Point(14, 46) };
+            _themeCombo = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Location = new Point(120, 42),
+                Size = new Size(240, 23)
+            };
+            // Order MUST match the ThemePreference enum (System=0, Light=1, Dark=2).
+            _themeCombo.Items.AddRange(new object[]
+            {
+                "Match Windows setting",
+                "Light",
+                "Dark"
+            });
+            _themeCombo.SelectedIndex = (int)settings.Theme;
+
+            var blurb = new Label
+            {
+                Text = "Applies to all AutoRipper windows as soon as you click Save — no restart needed. " +
+                       "\"Match Windows setting\" follows the Windows light/dark app mode (on Windows 7/8, " +
+                       "which has no such setting, it means Light). A few Windows-drawn details (tab headers, " +
+                       "progress bars) always stay light — that's a Windows limitation, not a broken theme.",
+                AutoSize = false,
+                Location = new Point(14, 78),
+                Size = new Size(660, 64)
+            };
+
+            panel.Controls.Add(heading);
+            panel.Controls.Add(themeLabel);
+            panel.Controls.Add(_themeCombo);
+            panel.Controls.Add(blurb);
+            return panel;
         }
 
         private Control BuildAdvancedPanel(AppSettings settings)
@@ -284,6 +338,8 @@ namespace MediaRipperEncoder.Forms
             _settings.NetworkRipSource = (_networkRipSource.Text ?? "").Trim();
             _settings.NetworkRipSearchSubfolders = _networkRipSearchSubfolders.Checked;
 
+            _settings.Theme = (ThemePreference)_themeCombo.SelectedIndex;
+
             NodeRole priorRole = _settings.NodeRole;
             _settings.NodeRole = (NodeRole)_nodeRole.SelectedIndex;
             _settings.NodeServerHost = (_nodeHost.Text ?? "").Trim();
@@ -327,6 +383,10 @@ namespace MediaRipperEncoder.Forms
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
+
+            // Theme applies live to every open window — the visible confirmation the save took.
+            ThemeManager.Initialize(_settings.Theme);
+            ThemeManager.ApplyToAllOpenForms();
 
             DialogResult = DialogResult.OK;
             Close();

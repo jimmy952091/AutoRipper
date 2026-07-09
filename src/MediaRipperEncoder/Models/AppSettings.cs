@@ -67,6 +67,10 @@ namespace MediaRipperEncoder.Models
         /// <summary>Drive letter of the last optical drive used (Phase 2+). Blank until set.</summary>
         public string LastUsedDrive { get; set; }
 
+        /// <summary>UI theme: follow Windows, or force Light/Dark. Defaults to Light (the app's
+        /// original look) so an update never surprises an existing user with a sudden theme change.</summary>
+        public ThemePreference Theme { get; set; }
+
         // --- Advanced: network / mapped-drive rip source ---
         // A backup path for a machine with no local optical drive (e.g. a headless server): point
         // MakeMKV at a disc shared/mapped from another PC over the LAN. Because the drive is remote,
@@ -129,6 +133,7 @@ namespace MediaRipperEncoder.Models
             ShowWelcomeOnStartup = true;
             SetupCompleted = false;
             LastUsedDrive = "";
+            Theme = ThemePreference.Light;
             NetworkRipEnabled = false;
             NetworkRipSource = "";
             NetworkRipSearchSubfolders = true;

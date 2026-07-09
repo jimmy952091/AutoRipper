@@ -30,6 +30,7 @@ namespace MediaRipperEncoder
 
             Logger.Info("Application starting.");
             AppSettings settings = SettingsStore.Load();
+            ThemeManager.Initialize(settings.Theme);
 
             // "First run" = no saved settings yet, or setup was never completed. In either
             // case the user must go through the wizard before reaching the main window.

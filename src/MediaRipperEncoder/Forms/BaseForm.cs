@@ -27,6 +27,8 @@ namespace MediaRipperEncoder.Forms
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
+            // Theme first (colors), then clamp (geometry) — every window inherits both behaviours.
+            ThemeManager.Apply(this);
             ClampToScreenWorkingArea();
         }
 
