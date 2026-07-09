@@ -27,6 +27,13 @@ namespace MediaRipperEncoder.Models
         /// </summary>
         public string HandBrakeAnimationPresetPath { get; set; }
 
+        /// <summary>
+        /// OPTIONAL path to fre:ac's command-line tool (freaccmd.exe) — only needed for the
+        /// Rip Music window (audio CDs use a different engine than MakeMKV/HandBrake).
+        /// Video-only users leave this blank and are never forced to install it.
+        /// </summary>
+        public string FreacCmdPath { get; set; }
+
         // --- Metadata lookup API keys (Phase 5) ---
 
         /// <summary>OMDb API key (free from omdbapi.com) — used for movie lookups (IMDb proxy).</summary>
@@ -122,6 +129,7 @@ namespace MediaRipperEncoder.Models
             HandBrakeCliPath = "";
             HandBrakePresetPath = "";
             HandBrakeAnimationPresetPath = "";
+            FreacCmdPath = "";
             OmdbApiKey = "";
             TheTvdbApiKey = "";
             TheTvdbPin = "";
