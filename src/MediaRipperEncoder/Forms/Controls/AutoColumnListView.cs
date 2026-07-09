@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
@@ -33,6 +34,21 @@ namespace MediaRipperEncoder.Forms.Controls
         private const int LVM_FIRST = 0x1000;
         private const int LVM_SETGROUPINFO = LVM_FIRST + 147;
         private const int LVM_GETGROUPINFO = LVM_FIRST + 149;
+        private const int LVM_GETGROUPRECT = LVM_FIRST + 98;
+        private const int LVGGR_HEADER = 1;
+        private const int WM_LBUTTONDOWN = 0x0201;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct RECT
+        {
+            public int left;
+            public int top;    // set to LVGGR_HEADER before sending LVM_GETGROUPRECT
+            public int right;
+            public int bottom;
+        }
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, ref RECT lParam);
 
         private const int LVGF_STATE = 0x00000004;
         private const int LVGS_COLLAPSED = 0x00000001;
@@ -212,6 +228,25 @@ namespace MediaRipperEncoder.Forms.Controls
 
         protected override void WndProc(ref Message m)
         {
+            // Fold/unfold on a group-header click. The native list-view DRAWS the chevron for
+            // collapsible groups but does not toggle them on click in a WinForms host (Explorer
+            // implements that itself) — verified on a real run: clicks did nothing. So we own the
+            // gesture: any click on a tracked disc's header line (chevron included) toggles it.
+            // The message is swallowed so nothing else reinterprets the click.
+            if (m.Msg == WM_LBUTTONDOWN && ShowGroups && _groupCollapsed.Count > 0)
+            {
+                var clickPoint = new Point(
+                    (short)((long)m.LParam & 0xFFFF),
+                    (short)(((long)m.LParam >> 16) & 0xFFFF));
+
+                ListViewGroup hit = TrackedGroupHeaderAt(clickPoint);
+                if (hit != null)
+                {
+                    SetGroupCollapsed(hit, !IsGroupCollapsed(hit));
+                    return;
+                }
+            }
+
             if (m.Msg == WM_NOTIFY && m.LParam != IntPtr.Zero)
             {
                 var hdr = (NMHDR)Marshal.PtrToStructure(m.LParam, typeof(NMHDR));
@@ -223,6 +258,31 @@ namespace MediaRipperEncoder.Forms.Controls
                 }
             }
             base.WndProc(ref m);
+        }
+
+        /// <summary>
+        /// Returns the tracked (collapsible) group whose header line contains the given client
+        /// point, or null. Header rectangles come from the control itself (LVM_GETGROUPRECT), so
+        /// this stays correct as groups scroll, resize, or collapse.
+        /// </summary>
+        private ListViewGroup TrackedGroupHeaderAt(Point clientPoint)
+        {
+            foreach (ListViewGroup group in _groupCollapsed.Keys)
+            {
+                if (group.ListView != this) { continue; }
+                int groupId = GetNativeGroupId(group);
+                if (groupId < 0) { continue; }
+
+                var rect = new RECT { top = LVGGR_HEADER }; // in: which rectangle; out: coordinates
+                SendMessage(Handle, LVM_GETGROUPRECT, (IntPtr)groupId, ref rect);
+
+                if (clientPoint.X >= rect.left && clientPoint.X < rect.right &&
+                    clientPoint.Y >= rect.top && clientPoint.Y < rect.bottom)
+                {
+                    return group;
+                }
+            }
+            return null;
         }
 
         /// <summary>Sizes the given column to the wider of its content or its header text.</summary>
