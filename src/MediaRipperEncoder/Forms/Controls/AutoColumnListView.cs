@@ -54,6 +54,44 @@ namespace MediaRipperEncoder.Forms.Controls
         private const int LVGS_COLLAPSED = 0x00000001;
         private const int LVGS_COLLAPSIBLE = 0x00000008;
 
+        // Custom-draw plumbing for dark-mode group headers. Windows paints group header text with
+        // a theme accent that ignores ForeColor AND survives DarkMode_Explorer (verified on real
+        // hardware: header stayed blue-on-dark). So in dark mode we paint the header ourselves.
+        private const int WM_REFLECT_NOTIFY = 0x204E;   // WM_REFLECT | WM_NOTIFY
+        private const int NM_CUSTOMDRAW = -12;
+        private const int CDDS_PREPAINT = 0x00000001;
+        private const int CDRF_SKIPDEFAULT = 0x00000004;
+        private const int LVCDI_GROUP = 0x00000001;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NMCUSTOMDRAW
+        {
+            public NMHDR hdr;
+            public int dwDrawStage;
+            public IntPtr hdc;
+            public RECT rc;
+            public IntPtr dwItemSpec;   // for groups: the native group id
+            public int uItemState;
+            public IntPtr lItemlParam;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NMLVCUSTOMDRAW
+        {
+            public NMCUSTOMDRAW nmcd;
+            public int clrText;
+            public int clrTextBk;
+            public int iSubItem;
+            public int dwItemType;      // LVCDI_GROUP when this notification is for a group header
+            public int clrFace;
+            public int iIconEffect;
+            public int iIconPhase;
+            public int iPartId;
+            public int iStateId;
+            public RECT rcText;
+            public int uAlign;
+        }
+
         // Full Vista+ LVGROUP layout. cbSize must match the struct the OS expects — passing the
         // shorter pre-Vista layout makes comctl32 v6 reject LVM_SETGROUPINFO outright (verified:
         // group state silently failed to apply with the short struct).
@@ -257,7 +295,88 @@ namespace MediaRipperEncoder.Forms.Controls
                     return; // swallow the default (content-only) auto-fit
                 }
             }
+
+            // Dark mode: paint group headers ourselves (see the custom-draw constants above for
+            // why). Only group notifications are intercepted — item drawing stays with WinForms,
+            // so row colors/selection behave exactly as before. Light mode never enters here.
+            if (m.Msg == WM_REFLECT_NOTIFY && m.LParam != IntPtr.Zero && ThemeManager.IsDark)
+            {
+                var rhdr = (NMHDR)Marshal.PtrToStructure(m.LParam, typeof(NMHDR));
+                if (rhdr.code == NM_CUSTOMDRAW)
+                {
+                    var cd = (NMLVCUSTOMDRAW)Marshal.PtrToStructure(m.LParam, typeof(NMLVCUSTOMDRAW));
+                    if (cd.dwItemType == LVCDI_GROUP && (cd.nmcd.dwDrawStage & CDDS_PREPAINT) != 0)
+                    {
+                        DrawDarkGroupHeader(cd.nmcd.hdc, (int)cd.nmcd.dwItemSpec);
+                        m.Result = (IntPtr)CDRF_SKIPDEFAULT;
+                        return;
+                    }
+                }
+            }
+
             base.WndProc(ref m);
+        }
+
+        /// <summary>
+        /// Paints one group header for dark mode: disc label in a readable accent, a separator
+        /// line, and the fold chevron — replacing Windows' default rendering, whose text color
+        /// can't be changed and is illegible on a dark background.
+        /// </summary>
+        private void DrawDarkGroupHeader(IntPtr hdc, int nativeGroupId)
+        {
+            ListViewGroup group = FindGroupByNativeId(nativeGroupId);
+
+            var rc = new RECT { top = LVGGR_HEADER };
+            SendMessage(Handle, LVM_GETGROUPRECT, (IntPtr)nativeGroupId, ref rc);
+            Rectangle bounds = Rectangle.FromLTRB(rc.left, rc.top, rc.right, rc.bottom);
+            if (bounds.Width <= 0 || bounds.Height <= 0) { return; }
+
+            string text = group != null ? (group.Header ?? "") : "";
+            bool collapsed = group != null && IsGroupCollapsed(group);
+
+            // Soft blue-on-dark: keeps the "header accent" feel without the illegibility.
+            Color headerText = Color.FromArgb(140, 185, 240);
+
+            using (Graphics g = Graphics.FromHdc(hdc))
+            {
+                using (var back = new SolidBrush(ThemeManager.FieldBack))
+                {
+                    g.FillRectangle(back, bounds);
+                }
+
+                var textRect = new Rectangle(bounds.X + 6, bounds.Y, Math.Max(0, bounds.Width - 44), bounds.Height);
+                const TextFormatFlags flags = TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
+                TextRenderer.DrawText(g, text, Font, textRect, headerText, flags);
+
+                // Separator from the end of the text to the chevron, like the native header.
+                int textWidth = TextRenderer.MeasureText(g, text, Font).Width;
+                int lineStart = Math.Min(bounds.X + 6 + textWidth + 8, bounds.Right - 40);
+                int midY = bounds.Y + bounds.Height / 2;
+                if (lineStart < bounds.Right - 30)
+                {
+                    using (var pen = new Pen(ThemeManager.Border))
+                    {
+                        g.DrawLine(pen, lineStart, midY, bounds.Right - 30, midY);
+                    }
+                }
+
+                // Chevron glyph (decorative — clicks anywhere on the header toggle the fold).
+                var glyphRect = new Rectangle(bounds.Right - 28, bounds.Y, 22, bounds.Height);
+                TextRenderer.DrawText(g, collapsed ? "▼" : "▲", Font, glyphRect, headerText,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+            }
+        }
+
+        /// <summary>Finds the managed group matching a native group id, or null.</summary>
+        private ListViewGroup FindGroupByNativeId(int nativeGroupId)
+        {
+            foreach (ListViewGroup group in Groups)
+            {
+                if (GetNativeGroupId(group) == nativeGroupId) { return group; }
+            }
+            return null;
         }
 
         /// <summary>
