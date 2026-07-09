@@ -19,6 +19,9 @@
     <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
     <!-- C# 7.3 is the newest language version fully supported on .NET Framework 4.8. -->
     <LangVersion>7.3</LangVersion>
+    <!-- App icon (disc -> pipeline -> TV). Generated from tools\IconGenerator.cs — edit that
+         and re-run it rather than editing the .ico directly. -->
+    <ApplicationIcon>autoripper.ico</ApplicationIcon>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
   </PropertyGroup>
 

@@ -28,6 +28,10 @@
     <MajorUpgrade DowngradeErrorMessage="A newer version of AutoRipper is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
+    <!-- App icon shown in Add/Remove Programs. Shortcuts get the exe's own embedded icon. -->
+    <Icon Id="AutoRipperIco" SourceFile="$(var.SrcDir)\autoripper.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AutoRipperIco" />
+
     <!-- .NET Framework 4.8 gate. NETFRAMEWORK45 holds the raw Release DWORD ("#528040" = 4.8).
          Lexicographic compare is safe: every relevant Release value is six digits. -->
     <PropertyRef Id="NETFRAMEWORK45" />

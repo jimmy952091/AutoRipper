@@ -22,6 +22,17 @@ namespace MediaRipperEncoder.Forms
         public BaseForm()
         {
             AutoScroll = true;
+
+            // Give every window the app icon (title bar + taskbar). The icon is embedded in the
+            // exe via <ApplicationIcon>, but WinForms windows don't pick it up automatically.
+            try
+            {
+                Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+            }
+            catch
+            {
+                // Default form icon is fine (e.g. running under a test harness).
+            }
         }
 
         protected override void OnLoad(EventArgs e)

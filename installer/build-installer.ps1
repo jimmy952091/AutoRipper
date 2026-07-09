@@ -23,6 +23,7 @@ New-Item -ItemType Directory -Force -Path $out | Out-Null
     -ext WixToolset.Netfx.wixext `
     -arch x64 `
     -d "PublishDir=$publish" `
+    -d "SrcDir=$(Join-Path $root 'src\MediaRipperEncoder')" `
     -o (Join-Path $out "AutoRipper-0.1.0-x64.msi")
 if ($LASTEXITCODE -ne 0) { throw "MSI build failed." }
 
