@@ -10,12 +10,14 @@ namespace MediaRipperEncoder.Services
     public static class AppInfo
     {
         /// <summary>
-        /// Folder-safe internal id, used for the %AppData% subfolder and the assembly name.
-        /// Deliberately kept stable (NOT renamed to "AutoRipper") so existing users' saved
-        /// settings/logs aren't orphaned and the build/test harnesses keep resolving the
-        /// assembly. The user-facing name is <see cref="DisplayName"/>.
+        /// Folder-safe name for the %AppData% subfolder. Renamed to match the product (a binary
+        /// that installs under one name and runs under another looks suspicious); settings saved
+        /// by older builds are carried over by <see cref="MigrateLegacyAppData"/>.
         /// </summary>
-        public const string AppName = "MediaRipperEncoder";
+        public const string AppName = "AutoRipper";
+
+        /// <summary>The pre-rename AppData folder name (written by older builds).</summary>
+        private const string LegacyAppName = "MediaRipperEncoder";
 
         /// <summary>Human-friendly product name shown in window titles and messages.</summary>
         public const string DisplayName = "AutoRipper";
@@ -49,6 +51,45 @@ namespace MediaRipperEncoder.Services
         public static void EnsureAppDataFolder()
         {
             Directory.CreateDirectory(AppDataFolder);
+        }
+
+        /// <summary>
+        /// One-time carry-over of settings/logs from the old %AppData%\MediaRipperEncoder folder
+        /// into %AppData%\AutoRipper. COPIES rather than moves, so older builds still pointing at
+        /// the old folder keep working during a mixed-version transition. Runs before settings are
+        /// first loaded; if it fails, the app just starts with fresh defaults (never crashes).
+        /// </summary>
+        public static void MigrateLegacyAppData()
+        {
+            try
+            {
+                string roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string oldDir = Path.Combine(roaming, LegacyAppName);
+                string newDir = Path.Combine(roaming, AppName);
+
+                // Only migrate into a folder that doesn't exist yet — never overwrite settings
+                // the new-name build has already written.
+                if (!Directory.Exists(oldDir) || Directory.Exists(newDir)) { return; }
+
+                CopyTree(oldDir, newDir);
+            }
+            catch
+            {
+                // Fresh defaults are an acceptable fallback; a failed migration must not block startup.
+            }
+        }
+
+        private static void CopyTree(string sourceDir, string destDir)
+        {
+            Directory.CreateDirectory(destDir);
+            foreach (string file in Directory.GetFiles(sourceDir))
+            {
+                File.Copy(file, Path.Combine(destDir, Path.GetFileName(file)), overwrite: false);
+            }
+            foreach (string sub in Directory.GetDirectories(sourceDir))
+            {
+                CopyTree(sub, Path.Combine(destDir, Path.GetFileName(sub)));
+            }
         }
     }
 }

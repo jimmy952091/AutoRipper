@@ -34,14 +34,18 @@
     <Launch Condition="Installed OR NETFRAMEWORK45 &gt;= &quot;#528040&quot;"
             Message="AutoRipper requires the .NET Framework 4.8 runtime, which is not installed on this machine.&#13;&#10;&#13;&#10;Download the OFFLINE installer (ndp48-x86-x64-allos-enu.exe) from:&#13;&#10;https://dotnet.microsoft.com/download/dotnet-framework/net48&#13;&#10;&#13;&#10;The offline installer works on desktop and server editions (Windows 7 SP1 through Server 2022) without needing Windows Update. Install it, then run this setup again." />
 
+    <!-- Desktop shortcut is created by default; scripted installs can opt out with
+         msiexec ... INSTALLDESKTOPSHORTCUT=0 -->
+    <Property Id="INSTALLDESKTOPSHORTCUT" Value="1" />
+
     <!-- Application files. -->
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="AutoRipper">
         <Component Id="MainExecutable">
-          <File Id="AutoRipperExe" Source="$(var.PublishDir)\MediaRipperEncoder.exe" KeyPath="yes" />
+          <File Id="AutoRipperExe" Source="$(var.PublishDir)\AutoRipper.exe" KeyPath="yes" />
         </Component>
         <Component Id="ExeConfig">
-          <File Source="$(var.PublishDir)\MediaRipperEncoder.exe.config" />
+          <File Source="$(var.PublishDir)\AutoRipper.exe.config" />
         </Component>
         <Component Id="NewtonsoftJson">
           <File Source="$(var.PublishDir)\Newtonsoft.Json.dll" />
@@ -63,14 +67,29 @@
           <Shortcut Id="AppShortcut"
                     Name="AutoRipper"
                     Description="Automated disc ripping and encoding for media servers"
-                    Target="[INSTALLFOLDER]MediaRipperEncoder.exe"
+                    Target="[INSTALLFOLDER]AutoRipper.exe"
                     WorkingDirectory="INSTALLFOLDER" />
           <RemoveFolder Id="RemoveAppMenuFolder" Directory="AppMenuFolder" On="uninstall" />
           <!-- Shortcuts can't be a component KeyPath; a per-user registry marker is the standard pattern. -->
-          <RegistryValue Root="HKCU" Key="Software\MediaRipperEncoder" Name="StartMenuShortcut"
+          <RegistryValue Root="HKCU" Key="Software\AutoRipper" Name="StartMenuShortcut"
                          Type="integer" Value="1" KeyPath="yes" />
         </Component>
       </Directory>
+    </StandardDirectory>
+
+    <!-- Desktop shortcut (default on; see INSTALLDESKTOPSHORTCUT above). Taskbar pinning is
+         deliberately absent: Windows provides no supported way for installers to pin — users
+         pin manually via right-click. -->
+    <StandardDirectory Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Condition="INSTALLDESKTOPSHORTCUT = 1">
+        <Shortcut Id="DesktopAppShortcut"
+                  Name="AutoRipper"
+                  Description="Automated disc ripping and encoding for media servers"
+                  Target="[INSTALLFOLDER]AutoRipper.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue Root="HKCU" Key="Software\AutoRipper" Name="DesktopShortcut"
+                       Type="integer" Value="1" KeyPath="yes" />
+      </Component>
     </StandardDirectory>
 
   </Package>

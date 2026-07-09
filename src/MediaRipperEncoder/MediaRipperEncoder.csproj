@@ -8,7 +8,10 @@
     <!-- x64 primary target per project spec. -->
     <PlatformTarget>x64</PlatformTarget>
     <RootNamespace>MediaRipperEncoder</RootNamespace>
-    <AssemblyName>MediaRipperEncoder</AssemblyName>
+    <!-- The binary is named AutoRipper.exe (what users see installed/running); the internal
+         namespaces keep the original MediaRipperEncoder name — invisible to end users and not
+         worth a repo-wide rename. -->
+    <AssemblyName>AutoRipper</AssemblyName>
     <Product>AutoRipper</Product>
     <Version>0.1.0</Version>
     <Copyright>Copyright (C) 2026 James Spurgeon (heto.black@gmail.com)</Copyright>

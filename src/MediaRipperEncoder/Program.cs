@@ -28,6 +28,11 @@ namespace MediaRipperEncoder
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
+            // Carry settings over from the old MediaRipperEncoder AppData folder (pre-rename
+            // builds) BEFORE the first settings load, or existing users would see the setup
+            // wizard again after updating.
+            AppInfo.MigrateLegacyAppData();
+
             Logger.Info("Application starting.");
             AppSettings settings = SettingsStore.Load();
             ThemeManager.Initialize(settings.Theme);
