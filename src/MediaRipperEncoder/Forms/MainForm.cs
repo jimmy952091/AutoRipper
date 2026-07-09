@@ -43,8 +43,13 @@ namespace MediaRipperEncoder.Forms
         private AutoColumnListView _encodeList;
         private ProgressBar _ripProgress;
         private ProgressBar _encodeProgress;
+        private GroupBox _ripGroup;
+        private GroupBox _encodeGroup;
         private Label _providerModeLabel;
         private Label _statusStrip;
+
+        // EncoderServer role only: receives rips from a client and encodes them here.
+        private Services.Net.EncodeServerHost _encodeServer;
 
         // Rip side: one group per disc, one row per title.
         private readonly Dictionary<Guid, ListViewGroup> _ripGroups = new Dictionary<Guid, ListViewGroup>();
@@ -85,9 +90,88 @@ namespace MediaRipperEncoder.Forms
             _pipeline.ResolveConflict = ResolveConflict;
 
             UpdateProviderModeLabel();
+            ConfigureForNodeRole();
 
             Load += (s, e) => RefreshDrives(selectLetter: _settings.LastUsedDrive);
-            FormClosed += (s, e) => { if (_pipeline != null) { _pipeline.Dispose(); } };
+            FormClosed += (s, e) =>
+            {
+                if (_pipeline != null) { _pipeline.Dispose(); }
+                if (_encodeServer != null) { _encodeServer.Dispose(); }
+            };
+        }
+
+        /// <summary>
+        /// Adapts the window to the node role (Advanced settings): a RipperClient shows the live
+        /// encoder-server connection state; an EncoderServer stops local ripping and instead
+        /// listens for a ripper client, showing the jobs it receives in the encode list.
+        /// </summary>
+        private void ConfigureForNodeRole()
+        {
+            if (_settings.NodeRole == NodeRole.RipperClient && _pipeline.IsRemoteRipper)
+            {
+                _pipeline.RemoteConnectionChanged += OnRemoteConnectionChanged;
+                _encodeGroup.Text = "Encode queue → remote encoder (" + _settings.NodeServerHost + ") — connecting…";
+            }
+            else if (_settings.NodeRole == NodeRole.RipperClient)
+            {
+                // RipperClient chosen but not fully configured — say so instead of silently ripping+encoding locally.
+                _encodeGroup.Text = "Encode queue (local — remote encoder not configured; set host + secret in Settings)";
+            }
+            else if (_settings.NodeRole == NodeRole.EncoderServer)
+            {
+                StartEncoderServerMode();
+            }
+        }
+
+        private void OnRemoteConnectionChanged(bool connected)
+        {
+            UI(() =>
+            {
+                _encodeGroup.Text = connected
+                    ? "Encode queue → remote encoder (" + _settings.NodeServerHost + ") — ● connected"
+                    : "Encode queue → remote encoder (" + _settings.NodeServerHost + ") — ○ reconnecting…";
+                SetStatus(connected
+                    ? "Connected to the encoder server. Ripped files will be sent there to encode."
+                    : "Lost the encoder server connection — ripping continues; files send automatically when it's back.",
+                    !connected);
+            });
+        }
+
+        /// <summary>
+        /// EncoderServer role: this machine doesn't rip — it receives ripped files from a client
+        /// and encodes them. Disable the disc controls, relabel the panels, and start the listener.
+        /// </summary>
+        private void StartEncoderServerMode()
+        {
+            _ripGroup.Text = "Rip queue — disabled (this machine is an Encoder Server node)";
+            _driveCombo.Enabled = false;
+            _rescanButton.Enabled = false;
+            _ejectButton.Enabled = false;
+            _scanButton.Enabled = false;
+            SetDriveStatus("Encoder Server node: this machine encodes rips sent by a client; it does not rip discs itself.", false);
+
+            if (string.IsNullOrWhiteSpace(_settings.NodeSharedSecret))
+            {
+                _encodeGroup.Text = "Encode queue — SERVER NOT STARTED (set a shared secret in Settings first)";
+                SetStatus("Encoder Server can't start without a shared secret. Set one in Tools > Settings > Advanced.", true);
+                return;
+            }
+
+            try
+            {
+                _encodeServer = new Services.Net.EncodeServerHost(_settings);
+                _encodeServer.JobUpdated += job => OnEncodeJobUpdated(job); // reuse the encode list UI
+                _encodeServer.Start();
+                _encodeGroup.Text = "Encode queue (Encoder Server — listening on port " + _settings.NodePort + ")";
+                SetStatus("Encoder Server node running on port " + _settings.NodePort +
+                          ". LAN only — do not port-forward this port.", false);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("Failed to start Encoder Server.", ex);
+                _encodeGroup.Text = "Encode queue — SERVER FAILED TO START (see log)";
+                SetStatus("Encoder Server failed to start: " + ex.Message, true);
+            }
         }
 
         // ---------------- menu ----------------
@@ -237,6 +321,7 @@ namespace MediaRipperEncoder.Forms
         private Control BuildRipGroup()
         {
             var group = new GroupBox { Text = "Rip queue (one disc at a time)", Dock = DockStyle.Fill, Margin = new Padding(0, 0, 5, 0) };
+            _ripGroup = group;
 
             var inner = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(6) };
             inner.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -276,6 +361,7 @@ namespace MediaRipperEncoder.Forms
         private Control BuildEncodeGroup()
         {
             var group = new GroupBox { Text = "Encode queue (parallel; check items to re-encode)", Dock = DockStyle.Fill, Margin = new Padding(5, 0, 0, 0) };
+            _encodeGroup = group;
 
             var inner = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(6) };
             inner.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
