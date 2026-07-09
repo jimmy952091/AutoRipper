@@ -32,6 +32,7 @@ namespace MediaRipperEncoder.Forms.Controls
 
         private const int LVM_FIRST = 0x1000;
         private const int LVM_SETGROUPINFO = LVM_FIRST + 147;
+        private const int LVM_GETGROUPINFO = LVM_FIRST + 149;
 
         private const int LVGF_STATE = 0x00000004;
         private const int LVGS_COLLAPSED = 0x00000001;
@@ -88,17 +89,52 @@ namespace MediaRipperEncoder.Forms.Controls
         }
 
         /// <summary>
-        /// Re-applies the native collapsible/collapsed state for a group we already track. Call
-        /// this after changing a group's Header text: WinForms re-sends the group to the OS on a
-        /// header change WITHOUT the collapsible flag, which silently disables the chevron on the
-        /// disc that's still ripping (its header updates as the operation changes). Preserves the
-        /// current folded/expanded choice. No-op for groups we were never asked to make collapsible.
+        /// Reads the group's CURRENT collapsed state from the OS — the ground truth that includes
+        /// the user's own chevron clicks, which happen natively without telling WinForms (or us).
+        /// Falls back to our bookkeeping if the handle isn't ready.
         /// </summary>
-        public void RefreshGroupState(ListViewGroup group)
+        public bool IsGroupCollapsed(ListViewGroup group)
         {
-            bool collapsed;
-            if (group == null || !_groupCollapsed.TryGetValue(group, out collapsed)) { return; }
-            if (IsHandleCreated) { ApplyGroupState(group, collapsed); }
+            bool tracked;
+            _groupCollapsed.TryGetValue(group, out tracked);
+
+            int groupId = GetNativeGroupId(group);
+            if (group == null || group.ListView != this || groupId < 0 || !IsHandleCreated)
+            {
+                return tracked;
+            }
+
+            var lvg = new LVGROUP
+            {
+                cbSize = (uint)Marshal.SizeOf(typeof(LVGROUP)),
+                mask = LVGF_STATE,
+                stateMask = LVGS_COLLAPSIBLE | LVGS_COLLAPSED
+            };
+            SendMessage(Handle, LVM_GETGROUPINFO, (IntPtr)groupId, ref lvg);
+            return (lvg.state & LVGS_COLLAPSED) != 0;
+        }
+
+        /// <summary>
+        /// Changes a group's header text WITHOUT losing its fold state. Two problems this solves:
+        /// setting ListViewGroup.Header makes WinForms re-send the group to the OS minus the
+        /// collapsible flag (killing the chevron), and our own bookkeeping doesn't know about the
+        /// user's manual chevron clicks. So: read the real state from the OS first, set the text,
+        /// then re-apply chevron + the state we just read — the user's choice survives.
+        /// </summary>
+        public void SetGroupHeaderPreservingState(ListViewGroup group, string header)
+        {
+            if (group == null || group.ListView != this || group.Header == header) { return; }
+
+            bool tracked = _groupCollapsed.ContainsKey(group);
+            bool collapsed = tracked && IsGroupCollapsed(group); // read BEFORE the header stomps it
+
+            group.Header = header;
+
+            if (tracked)
+            {
+                _groupCollapsed[group] = collapsed; // adopt the user's latest choice as ours
+                if (IsHandleCreated) { ApplyGroupState(group, collapsed); }
+            }
         }
 
         private void ApplyGroupState(ListViewGroup group, bool collapsed)

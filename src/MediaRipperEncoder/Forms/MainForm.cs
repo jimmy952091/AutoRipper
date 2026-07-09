@@ -67,6 +67,9 @@ namespace MediaRipperEncoder.Forms
             public int TitleIndex;
         }
 
+        /// <summary>Discs that already got their one automatic fold-on-completion (see OnRipJobUpdated).</summary>
+        private readonly HashSet<Guid> _autoFoldedJobs = new HashSet<Guid>();
+
         public MainForm(AppSettings settings)
         {
             _settings = settings;
@@ -586,21 +589,19 @@ namespace MediaRipperEncoder.Forms
                     // scroll position back to the top, so doing it on every progress tick made the
                     // rip side jump and flicker. CurrentOperation changes rarely (operation names,
                     // not the percentage), so this update is now infrequent.
-                    string header = job.DiscLabel + "  —  " + job.CurrentOperation;
-                    if (group.Header != header)
-                    {
-                        group.Header = header;
-                        // Changing the header drops the native collapsible flag — re-apply it so
-                        // the chevron keeps working on the disc that's currently ripping.
-                        _ripList.RefreshGroupState(group);
-                    }
+                    // Header updates preserve the group's fold state INCLUDING the user's own
+                    // chevron clicks (which happen natively, without any event to us).
+                    _ripList.SetGroupHeaderPreservingState(group, job.DiscLabel + "  —  " + job.CurrentOperation);
 
                     // A disc that finished with every title successful folds up into its header
-                    // line (Excel-style), so completed discs stop taking vertical space. A disc
-                    // with failures stays expanded — the red rows need to be visible for
-                    // "Retry failed title(s)".
-                    if (job.Status == RipStatus.Completed && AllTitleRowsCompleted(group))
+                    // line (Excel-style) — but only ONCE. After that the chevron belongs to the
+                    // user; re-asserting the fold on every late event was overriding their clicks
+                    // ("chevron does nothing"). Discs with failures stay expanded so the red rows
+                    // are visible for "Retry failed title(s)".
+                    if (job.Status == RipStatus.Completed &&
+                        !_autoFoldedJobs.Contains(job.Id) && AllTitleRowsCompleted(group))
                     {
+                        _autoFoldedJobs.Add(job.Id);
                         _ripList.SetGroupCollapsed(group, true);
                     }
                 }
