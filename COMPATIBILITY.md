@@ -6,7 +6,7 @@ Real-world verified combinations. "Verified" means actually run on hardware, not
 
 | Windows | AutoRipper | Notes |
 |---|---|---|
-| Windows 7 SP1 / 8 / 8.1 | ✅ Verified (Win7, eMachines laptop) | Requires .NET Framework 4.8 (offline installer: `ndp48-x86-x64-allos-enu.exe`). See the HandBrake version note below — this is the important one. |
+| Windows 7 SP1 / 8 / 8.1 | ✅ Verified (Win7 **Home Premium**, eMachines laptop) | Requires .NET Framework 4.8 (offline installer: `ndp48-x86-x64-allos-enu.exe`). Tested on Home Premium; other editions (incl. Home Basic) are expected to work — .NET 4.8 and everything AutoRipper uses ship in all editions. See the HandBrake version note below — this is the important one. |
 | Windows 10 / 11 | ✅ Verified (daily driver) | Latest tools throughout. |
 | Windows Server 2019 | ✅ Verified (encoder node) | Use .NET Framework **4.8** — 4.8.1 does **not** support Server 2019. Add a TCP firewall rule for the node port (default 47820) for distributed mode. |
 | Windows Server 2022 | Expected OK (untested) | Same guidance as Server 2019. |
