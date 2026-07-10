@@ -51,9 +51,16 @@ namespace MediaRipperEncoder.Services
             // for cartoons vs. the general one for live-action). Fall back to the constructor
             // defaults when the job doesn't specify its own.
             string presetPath = !string.IsNullOrEmpty(job.PresetPath) ? job.PresetPath : _presetPath;
-            string presetName = !string.IsNullOrEmpty(job.PresetName)
-                ? job.PresetName
-                : (!string.IsNullOrEmpty(job.PresetPath) ? PresetInfo.GetPresetName(job.PresetPath) : _presetName);
+
+            // Re-read the preset NAME from the file at encode time, not from values cached when
+            // the app launched or the job was created. Users legitimately re-export a preset over
+            // the same file (e.g. rebuilding it in HandBrake 1.4 on Win7) and then hit Re-encode;
+            // a stale cached name made that fail with "preset not found" until an app restart.
+            string presetName = PresetInfo.GetPresetName(presetPath);
+            if (string.IsNullOrEmpty(presetName))
+            {
+                presetName = !string.IsNullOrEmpty(job.PresetName) ? job.PresetName : _presetName;
+            }
 
             // Check the tool + preset actually exist on THIS machine before trying to encode, so
             // a mis-configured box (e.g. a rip-only server without HandBrake, or preset paths that
