@@ -55,6 +55,13 @@
          Explorer show the episode name, not the disc label. Single managed DLL, no native
          dependencies; fine on .NET Framework 4.8 / Windows 7. -->
     <PackageReference Include="TagLibSharp" Version="2.3.0" />
+    <!-- Built-in music encoding (no external tools, nothing for Defender to distrust):
+         CUETools Flake = managed FLAC encoder (GPL, AGPL-compatible; the CUERipper codec);
+         NAudio.Lame = managed LAME wrapper for MP3 (bundles libmp3lame DLLs into our folder). -->
+    <PackageReference Include="CUETools.Codecs" Version="1.0.2" />
+    <PackageReference Include="CUETools.Codecs.FLAKE" Version="1.0.5" />
+    <PackageReference Include="NAudio.Core" Version="2.2.1" />
+    <PackageReference Include="NAudio.Lame" Version="2.1.0" />
   </ItemGroup>
 
 </Project>

@@ -28,11 +28,10 @@ namespace MediaRipperEncoder.Models
         public string HandBrakeAnimationPresetPath { get; set; }
 
         /// <summary>
-        /// OPTIONAL path to fre:ac's command-line tool (freaccmd.exe) — only needed for the
-        /// Rip Music window (audio CDs use a different engine than MakeMKV/HandBrake).
-        /// Video-only users leave this blank and are never forced to install it.
+        /// Output format for ripped music: "flac" (default), "mp3", or "wav". CD ripping and
+        /// encoding are built in (no external tool) — see Services\Music.
         /// </summary>
-        public string FreacCmdPath { get; set; }
+        public string MusicFormatId { get; set; }
 
         // --- Metadata lookup API keys (Phase 5) ---
 
@@ -129,7 +128,7 @@ namespace MediaRipperEncoder.Models
             HandBrakeCliPath = "";
             HandBrakePresetPath = "";
             HandBrakeAnimationPresetPath = "";
-            FreacCmdPath = "";
+            MusicFormatId = "flac";
             OmdbApiKey = "";
             TheTvdbApiKey = "";
             TheTvdbPin = "";

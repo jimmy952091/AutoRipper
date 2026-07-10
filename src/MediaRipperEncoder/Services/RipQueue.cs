@@ -105,15 +105,19 @@ namespace MediaRipperEncoder.Services
 
             _currentJobCancel = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token);
 
-            RipOutcome outcome = _makeMkv.Rip(job,
-                (pct, op) =>
-                {
-                    job.ProgressPercent = pct;
-                    if (!string.IsNullOrEmpty(op)) { job.CurrentOperation = op; }
-                    Raise(job);
-                },
-                tr => RaiseTitle(job, tr),
-                _currentJobCancel.Token);
+            Action<int, string> onProgress = (pct, op) =>
+            {
+                job.ProgressPercent = pct;
+                if (!string.IsNullOrEmpty(op)) { job.CurrentOperation = op; }
+                Raise(job);
+            };
+
+            // Same queue, two engines: video discs go through MakeMKV; audio CDs through the
+            // built-in raw reader. Everything downstream (eject, partial-failure handling,
+            // "Retry failed title(s)") is engine-agnostic and works for both.
+            RipOutcome outcome = job.Kind == JobKind.Music
+                ? Music.MusicRipWorker.Rip(job, onProgress, tr => RaiseTitle(job, tr), _currentJobCancel.Token)
+                : _makeMkv.Rip(job, onProgress, tr => RaiseTitle(job, tr), _currentJobCancel.Token);
 
             job.OutputFiles = outcome.OutputFiles;
 

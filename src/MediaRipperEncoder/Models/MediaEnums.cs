@@ -15,6 +15,17 @@ namespace MediaRipperEncoder.Models
         Cd
     }
 
+    /// <summary>
+    /// What engine a queued job runs on: Video = MakeMKV rip / HandBrake encode; Music = the
+    /// built-in CD audio reader / built-in FLAC-MP3-WAV encoders. Both kinds ride the same two
+    /// queues so the UI, retry, and failure-isolation behavior is identical.
+    /// </summary>
+    public enum JobKind
+    {
+        Video = 0,
+        Music = 1
+    }
+
     /// <summary>What kind of content this disc holds — decides which metadata fields apply.</summary>
     public enum MediaType
     {

@@ -38,8 +38,10 @@ namespace MediaRipperEncoder.Services.Music
         /// <summary>Exact lookup by Disc ID. Empty list = disc not in the database (use the fallback).</summary>
         public async Task<List<MusicRelease>> LookupByDiscIdAsync(string discId)
         {
+            // NOTE: inc must be exactly this — adding "discids" here is HTTP 400 on the discid
+            // resource (verified against the live API), and the disc lists come back by default.
             string url = BaseUrl + "/discid/" + Uri.EscapeDataString(discId ?? "") +
-                         "?fmt=json&inc=artist-credits+recordings+discids";
+                         "?fmt=json&inc=artist-credits+recordings";
             string json;
             try
             {
@@ -52,6 +54,34 @@ namespace MediaRipperEncoder.Services.Music
                 return new List<MusicRelease>();
             }
             return ParseDiscIdResponse(json, discId);
+        }
+
+        /// <summary>
+        /// Fuzzy TOC lookup: when the exact Disc ID is unknown (this specific pressing was never
+        /// submitted — common for budget reissues), MusicBrainz can still match the disc by its
+        /// raw table of contents against similar track layouts. Automatic second step after a
+        /// Disc ID miss, before asking the user to type anything.
+        /// </summary>
+        public async Task<List<MusicRelease>> LookupByTocAsync(Models.AudioCdToc toc)
+        {
+            // toc format: firstTrack+trackCount+leadout+offset1+offset2+...
+            var sb = new System.Text.StringBuilder();
+            sb.Append(toc.FirstTrack).Append('+').Append(toc.TrackCount).Append('+').Append(toc.LeadOutOffset);
+            foreach (int offset in toc.TrackOffsets) { sb.Append('+').Append(offset); }
+
+            string url = BaseUrl + "/discid/-?toc=" + sb +
+                         "&fmt=json&inc=artist-credits+recordings";
+            string json;
+            try
+            {
+                json = await GetAsync(url).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Logger.Info("MusicBrainz TOC lookup returned nothing (" + ex.Message + ").");
+                return new List<MusicRelease>();
+            }
+            return ParseDiscIdResponse(json, null);
         }
 
         /// <summary>Fuzzy fallback: search releases by typed artist + album.</summary>
@@ -68,6 +98,7 @@ namespace MediaRipperEncoder.Services.Music
         /// <summary>Fills in the track list for a release chosen from the fuzzy search.</summary>
         public async Task<MusicRelease> GetReleaseDetailAsync(string releaseId, string discIdToMatch)
         {
+            // The /release resource DOES accept discids in inc (unlike /discid — see above).
             string url = BaseUrl + "/release/" + Uri.EscapeDataString(releaseId ?? "") +
                          "?fmt=json&inc=artist-credits+recordings+discids";
             string json = await GetAsync(url).ConfigureAwait(false);

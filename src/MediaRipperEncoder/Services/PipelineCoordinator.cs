@@ -148,6 +148,45 @@ namespace MediaRipperEncoder.Services
         }
 
         /// <summary>
+        /// Queues a confirmed audio CD: the checked tracks ride the rip queue (built-in raw
+        /// reader -> WAV) and then the encode queue (built-in FLAC/MP3/WAV encode + tags +
+        /// placement) — the same two-queue flow as a video disc, per the one-flow design.
+        /// </summary>
+        public RipJob StartMusicJob(Models.MusicRelease release, Models.AudioCdToc toc,
+            string driveLetter, string formatId)
+        {
+            var results = new List<RipTitleResult>();
+            foreach (Models.AudioTrack track in release.Tracks)
+            {
+                if (!track.Selected) { continue; }
+                results.Add(new RipTitleResult
+                {
+                    TitleIndex = track.Number,
+                    Label = "Track " + track.Number.ToString("00") + "  " + track.Title +
+                            "  (" + track.LengthText + ")"
+                });
+            }
+
+            var job = new RipJob
+            {
+                Kind = JobKind.Music,
+                DriveLetter = driveLetter,
+                Toc = toc,
+                Release = release,
+                AudioFormatId = formatId,
+                DiscLabel = release.Artist + " — " + release.Album +
+                            (string.IsNullOrEmpty(release.Year) ? "" : " (" + release.Year + ")") + " [CD]",
+                OutputDirectory = Path.Combine(_settings.TempFolder,
+                    "cd_" + Guid.NewGuid().ToString("N").Substring(0, 8)),
+                TitleResults = results,
+                // TitleIndices non-empty so RipAllTitles stays false (not meaningful for CDs).
+                TitleIndices = new List<int> { -1 }
+            };
+            _ripQueue.Enqueue(job);
+            return job;
+        }
+
+        /// <summary>
         /// Queues a confirmed disc for ripping. <paramref name="discTitles"/> is the scan
         /// result, needed to pick the main feature for a movie (the movie screen has no
         /// per-title grid).
@@ -204,6 +243,12 @@ namespace MediaRipperEncoder.Services
 
         private void OnRipDone(RipJob job)
         {
+            if (job.Kind == JobKind.Music)
+            {
+                OnMusicRipDone(job);
+                return;
+            }
+
             MediaMetadata meta = job.Metadata;
             if (meta == null)
             {
@@ -231,6 +276,67 @@ namespace MediaRipperEncoder.Services
                 {
                     _encodeQueue.Enqueue(_planner.BuildEncodeJob(meta, mkv, titleIndex)); // FIFO local encode.
                 }
+            }
+        }
+
+        /// <summary>
+        /// Music hand-off: each ripped WAV ("NN.wav") becomes an encode job for its release
+        /// track. Cover art is fetched once per disc here (already on a background thread) and
+        /// attached to every track's job. Music always encodes LOCALLY, even in RipperClient
+        /// mode — a FLAC/MP3 encode takes seconds, so shipping WAVs to the encode server would
+        /// cost more in transfer than it saves.
+        /// </summary>
+        private void OnMusicRipDone(RipJob job)
+        {
+            byte[] cover = null;
+            try
+            {
+                cover = new Music.MusicBrainzClient().GetCoverArtAsync(job.Release.ReleaseId)
+                    .GetAwaiter().GetResult();
+                Logger.Info(cover != null
+                    ? "Cover art fetched (" + cover.Length + " bytes) for " + job.Release.Album
+                    : "No cover art in the archive for " + job.Release.Album + " (tracks unaffected).");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("Cover art fetch failed (tracks unaffected).", ex);
+            }
+
+            string extension = Music.MusicFormat.ById(job.AudioFormatId).Extension;
+
+            foreach (string wav in job.OutputFiles)
+            {
+                int trackNumber;
+                if (!int.TryParse(Path.GetFileNameWithoutExtension(wav), out trackNumber)) { continue; }
+
+                Models.AudioTrack track = null;
+                foreach (Models.AudioTrack t in job.Release.Tracks)
+                {
+                    if (t.Number == trackNumber) { track = t; break; }
+                }
+                if (track == null)
+                {
+                    Logger.Error("Ripped " + wav + " has no matching release track; skipping.");
+                    continue;
+                }
+
+                LibraryTarget target = Music.MusicPathBuilder.BuildTrack(
+                    _settings.MusicRoot, job.Release, track, extension);
+
+                _encodeQueue.Enqueue(new EncodeJob
+                {
+                    Kind = JobKind.Music,
+                    InputFile = wav,
+                    OutputFile = Path.Combine(_settings.TempFolder,
+                        "enc_" + Guid.NewGuid().ToString("N").Substring(0, 8), target.FileName),
+                    FinalTargetPath = target.FullPath,
+                    Release = job.Release,
+                    Track = track,
+                    CoverArt = cover,
+                    AudioFormatId = job.AudioFormatId,
+                    TitleIndex = trackNumber,
+                    DisplayName = target.FileName
+                });
             }
         }
 

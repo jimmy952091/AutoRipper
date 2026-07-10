@@ -21,13 +21,21 @@ namespace MediaRipperEncoder.Services
         public static PlacementResult FinishAndPlace(EncodeJob job,
             Func<PlacementPlan, ConflictResolution> resolveConflict)
         {
-            // Stamp the embedded Title tag (e.g. "Solo Leveling - S01E009 (Episode Name)") so VLC
-            // and Explorer show the show + episode instead of MakeMKV's disc label. Done on the
-            // staged file before it's moved.
-            string embeddedTitle = string.IsNullOrEmpty(job.EmbeddedTitle)
-                ? MediaTagWriter.TitleFromFileName(job.FinalTargetPath)
-                : job.EmbeddedTitle;
-            MediaTagWriter.SetTitle(job.OutputFile, embeddedTitle);
+            // Tag the staged file before it's moved. Music files get the full embedded tag set
+            // (artist/album/track/cover — media servers read music metadata from tags, not
+            // filenames); video files get the Title tag so players show the episode name
+            // instead of MakeMKV's disc label.
+            if (job.Kind == JobKind.Music && job.Release != null && job.Track != null)
+            {
+                Music.MusicTagger.Tag(job.OutputFile, job.Release, job.Track, job.CoverArt);
+            }
+            else
+            {
+                string embeddedTitle = string.IsNullOrEmpty(job.EmbeddedTitle)
+                    ? MediaTagWriter.TitleFromFileName(job.FinalTargetPath)
+                    : job.EmbeddedTitle;
+                MediaTagWriter.SetTitle(job.OutputFile, embeddedTitle);
+            }
 
             var target = new LibraryTarget
             {
@@ -60,6 +68,21 @@ namespace MediaRipperEncoder.Services
             else
             {
                 job.CurrentOperation = "Placed -> " + result.FinalPath;
+
+                // First placed track of an album also drops cover.jpg beside it — some media
+                // servers/pickers prefer a folder image over the embedded one.
+                if (job.Kind == JobKind.Music && job.CoverArt != null && job.CoverArt.Length > 0)
+                {
+                    try
+                    {
+                        string coverPath = Path.Combine(Path.GetDirectoryName(result.FinalPath), "cover.jpg");
+                        if (!File.Exists(coverPath)) { File.WriteAllBytes(coverPath, job.CoverArt); }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Error("Couldn't write album cover.jpg (tracks are unaffected).", ex);
+                    }
+                }
             }
 
             return result;

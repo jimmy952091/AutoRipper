@@ -107,14 +107,16 @@ namespace MediaRipperEncoder.Services
 
             _currentJobCancel = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token);
 
-            EncodeOutcome outcome = _handBrake.Encode(job,
-                (pct, op) =>
-                {
-                    if (pct >= 0) { job.ProgressPercent = pct; }
-                    if (!string.IsNullOrEmpty(op)) { job.CurrentOperation = op; }
-                    Raise(job);
-                },
-                _currentJobCancel.Token);
+            EncodeOutcome outcome = job.Kind == JobKind.Music
+                ? EncodeMusic(job, _currentJobCancel.Token)
+                : _handBrake.Encode(job,
+                    (pct, op) =>
+                    {
+                        if (pct >= 0) { job.ProgressPercent = pct; }
+                        if (!string.IsNullOrEmpty(op)) { job.CurrentOperation = op; }
+                        Raise(job);
+                    },
+                    _currentJobCancel.Token);
 
             if (outcome.Success)
             {
@@ -134,6 +136,52 @@ namespace MediaRipperEncoder.Services
                 Logger.Error("Encode job " + job.ShortId + " failed: " + outcome.Error);
                 Raise(job);
             }
+        }
+
+        /// <summary>
+        /// Music encode: WAV -> chosen format via the built-in encoders. Wrapped to the same
+        /// EncodeOutcome contract as HandBrake so the rest of the queue is engine-agnostic.
+        /// </summary>
+        private EncodeOutcome EncodeMusic(EncodeJob job, CancellationToken cancel)
+        {
+            var outcome = new EncodeOutcome();
+            try
+            {
+                Music.MusicEncoder.Encode(job.InputFile, job.OutputFile, job.AudioFormatId,
+                    pct =>
+                    {
+                        if (cancel.IsCancellationRequested) { throw new OperationCanceledException(); }
+                        if (pct != job.ProgressPercent)
+                        {
+                            job.ProgressPercent = pct;
+                            job.CurrentOperation = "Encoding";
+                            Raise(job);
+                        }
+                    });
+
+                var fi = new System.IO.FileInfo(job.OutputFile);
+                if (!fi.Exists || fi.Length == 0)
+                {
+                    outcome.Success = false;
+                    outcome.Error = "Music encode produced no output file.";
+                    return outcome;
+                }
+                outcome.Success = true;
+            }
+            catch (OperationCanceledException)
+            {
+                outcome.Success = false;
+                outcome.Error = "Encode cancelled.";
+                try { if (System.IO.File.Exists(job.OutputFile)) { System.IO.File.Delete(job.OutputFile); } }
+                catch { /* partial cleanup is best-effort */ }
+            }
+            catch (Exception ex)
+            {
+                outcome.Success = false;
+                outcome.Error = "Music encode failed: " + ex.Message;
+                Logger.Error("Music encode " + job.ShortId + " failed.", ex);
+            }
+            return outcome;
         }
 
         private void Raise(EncodeJob job)

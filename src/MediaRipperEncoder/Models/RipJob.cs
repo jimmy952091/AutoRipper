@@ -70,6 +70,20 @@ namespace MediaRipperEncoder.Models
         /// </summary>
         public MediaMetadata Metadata { get; set; }
 
+        // --- Music jobs (Kind == Music): audio CDs ride the same queue with a different worker ---
+
+        /// <summary>Which rip engine this job uses. Defaults to Video (MakeMKV).</summary>
+        public JobKind Kind { get; set; }
+
+        /// <summary>Audio CD table of contents (Music jobs) — provides each track's frame range.</summary>
+        public AudioCdToc Toc { get; set; }
+
+        /// <summary>The confirmed MusicBrainz release (Music jobs) — the music metadata package.</summary>
+        public MusicRelease Release { get; set; }
+
+        /// <summary>Output format id ("flac"/"mp3"/"wav") chosen when the job was queued.</summary>
+        public string AudioFormatId { get; set; }
+
         public RipJob()
         {
             Id = Guid.NewGuid();

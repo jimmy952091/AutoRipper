@@ -55,6 +55,23 @@ namespace MediaRipperEncoder.Models
         /// </summary>
         public string EmbeddedTitle { get; set; }
 
+        // --- Music jobs (Kind == Music): WAV -> FLAC/MP3/WAV encode + tag + place ---
+
+        /// <summary>Which encode engine this job uses. Defaults to Video (HandBrake).</summary>
+        public JobKind Kind { get; set; }
+
+        /// <summary>The confirmed release (Music jobs) — supplies the tags.</summary>
+        public MusicRelease Release { get; set; }
+
+        /// <summary>The specific track this file is (Music jobs).</summary>
+        public AudioTrack Track { get; set; }
+
+        /// <summary>Front cover image bytes to embed (Music jobs); null if unavailable.</summary>
+        public byte[] CoverArt { get; set; }
+
+        /// <summary>Output format id ("flac"/"mp3"/"wav") for Music jobs.</summary>
+        public string AudioFormatId { get; set; }
+
         public EncodeStatus Status { get; set; }
         public int ProgressPercent { get; set; }
         public string CurrentOperation { get; set; }
