@@ -28,6 +28,7 @@ namespace MediaRipperEncoder.Forms
         private ComboBox _discTypeCombo;
         private ComboBox _mediaTypeCombo;
         private ComboBox _presetCombo;
+        private Label _presetLabel;
 
         // Panels per media type
         private Panel _moviePanel;
@@ -134,7 +135,7 @@ namespace MediaRipperEncoder.Forms
             _mediaTypeCombo.SelectedIndex = 0;
             _mediaTypeCombo.SelectedIndexChanged += (s, e) => UpdateVisiblePanel();
 
-            var presetLabel = new Label { Text = "Encode preset:", AutoSize = true, Location = new Point(15, 52) };
+            _presetLabel = new Label { Text = "Encode preset:", AutoSize = true, Location = new Point(15, 52) };
             _presetCombo = new ComboBox
             {
                 DropDownStyle = ComboBoxStyle.DropDownList,
@@ -147,7 +148,7 @@ namespace MediaRipperEncoder.Forms
             Controls.Add(_discTypeCombo);
             Controls.Add(mediaLabel);
             Controls.Add(_mediaTypeCombo);
-            Controls.Add(presetLabel);
+            Controls.Add(_presetLabel);
             Controls.Add(_presetCombo);
         }
 
@@ -620,6 +621,10 @@ namespace MediaRipperEncoder.Forms
             _moviePanel.Visible = type == MediaType.Movie;
             _tvPanel.Visible = type == MediaType.TvShow;
             _musicPanel.Visible = type == MediaType.Music;
+
+            // HandBrake presets are a video concept — music has its own format in Settings > Music.
+            _presetCombo.Visible = type != MediaType.Music;
+            _presetLabel.Visible = type != MediaType.Music;
         }
 
         // ---------------- lookups ----------------

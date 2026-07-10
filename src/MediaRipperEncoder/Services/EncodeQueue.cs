@@ -154,7 +154,10 @@ namespace MediaRipperEncoder.Services
                         if (pct != job.ProgressPercent)
                         {
                             job.ProgressPercent = pct;
-                            job.CurrentOperation = "Encoding";
+                            // "(local)" matters in RipperClient mode: the panel banner says
+                            // "remote encoder", but music always encodes on this machine (a
+                            // 3-second FLAC encode isn't worth a 68 MB WAV transfer).
+                            job.CurrentOperation = "Encoding (local)";
                             Raise(job);
                         }
                     });
