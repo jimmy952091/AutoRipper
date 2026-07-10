@@ -32,6 +32,7 @@ namespace MediaRipperEncoder.Services.Music
             {
                 new MusicFormat("FLAC — lossless (tested)", "flac", "flac"),
                 new MusicFormat("MP3 — LAME VBR (tested)", "mp3", "mp3"),
+                new MusicFormat("OGG Vorbis — game-player friendly (tested)", "ogg", "ogg"),
                 new MusicFormat("WAV — uncompressed (tested)", "wav", "wav")
             };
         }

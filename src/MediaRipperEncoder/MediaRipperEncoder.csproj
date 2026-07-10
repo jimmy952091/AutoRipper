@@ -62,6 +62,9 @@
     <PackageReference Include="CUETools.Codecs.FLAKE" Version="1.0.5" />
     <PackageReference Include="NAudio.Core" Version="2.2.1" />
     <PackageReference Include="NAudio.Lame" Version="2.1.0" />
+    <!-- Pure-managed OGG Vorbis encoder (C# port of the Xiph encoder) — for game-friendly
+         .ogg output (UT2004's music player, Audiosurf, etc.). -->
+    <PackageReference Include="OggVorbisEncoder" Version="1.2.2" />
   </ItemGroup>
 
 </Project>

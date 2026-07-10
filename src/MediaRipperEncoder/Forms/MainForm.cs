@@ -207,6 +207,8 @@ namespace MediaRipperEncoder.Forms
 
             var helpMenu = new ToolStripMenuItem("&Help");
             helpMenu.DropDownItems.Add(new ToolStripMenuItem("&About AutoRipper...", null, OnAboutClicked));
+            helpMenu.DropDownItems.Add(new ToolStripSeparator());
+            helpMenu.DropDownItems.Add(new ToolStripMenuItem("&Uninstall AutoRipper...", null, OnUninstallClicked));
 
             menu.Items.Add(fileMenu);
             menu.Items.Add(editMenu);
@@ -234,6 +236,14 @@ namespace MediaRipperEncoder.Forms
             using (var about = new AboutForm())
             {
                 about.ShowDialog(this);
+            }
+        }
+
+        private void OnUninstallClicked(object sender, EventArgs e)
+        {
+            using (var dialog = new UninstallDialog())
+            {
+                dialog.ShowDialog(this);
             }
         }
 
