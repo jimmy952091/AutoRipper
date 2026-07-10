@@ -17,9 +17,13 @@ Real-world verified combinations. "Verified" means actually run on hardware, not
 - **HandBrake / HandBrakeCLI: use version 1.4.x** — it's the last release that supports
   Windows 7/8. The 1.4 GUI additionally requires the **.NET 5.0 desktop runtime** (a separate
   Microsoft download; only needed for the GUI — AutoRipper itself only drives the CLI).
-- **Preset portability (verified):** presets exported from a current HandBrake (1.11.x) on
-  Windows 10 load fine in HandBrake 1.4 on Windows 7. Presets using encoder features added
-  after 1.4 may not backport — re-test if you build presets around new options.
+- **Preset portability — DON'T (verified the hard way):** a preset exported from a current
+  HandBrake (1.11.x) *opens* in the 1.4 GUI, but **encoding with HandBrakeCLI 1.4 using that
+  preset file fails immediately** — the GUI converts old/new presets on import; the CLI takes
+  the JSON literally and rejects the newer schema. On Windows 7/8, **re-create your preset in
+  the installed HandBrake 1.4 GUI and export it from there**, then point AutoRipper at that
+  export. (Settings worth copying over by hand: encoder preset *slow*, profile High, level
+  Auto, RF 18, framerate Same-as-source/VFR, no subtitle tracks.)
 - **MakeMKV: the current version installs and runs on Windows 7 with no issues (verified).**
 
 ## Distributed (two-machine) mode
