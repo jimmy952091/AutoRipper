@@ -43,6 +43,30 @@ namespace MediaRipperEncoder.Services
             get { return !string.IsNullOrEmpty(_presetName); }
         }
 
+        // Whether this machine's HandBrakeCLI understands --no-metadata (newer CLIs do; 1.4 on
+        // Win7/8 doesn't and dies on unknown options). Probed once per app run via --help.
+        private bool? _supportsNoMetadata;
+
+        private bool SupportsNoMetadata()
+        {
+            if (_supportsNoMetadata.HasValue) { return _supportsNoMetadata.Value; }
+            try
+            {
+                ProcessRunResult probe = ProcessRunner.Run(_handBrakePath, "--help", 30000);
+                _supportsNoMetadata = probe.Started && probe.CombinedOutput.Contains("--no-metadata");
+            }
+            catch
+            {
+                _supportsNoMetadata = false;
+            }
+            if (!_supportsNoMetadata.Value)
+            {
+                Logger.Info("This HandBrakeCLI doesn't list --no-metadata (older version, e.g. 1.4 " +
+                            "on Windows 7/8) — omitting the flag; titles are still set by the tagger.");
+            }
+            return _supportsNoMetadata.Value;
+        }
+
         public EncodeOutcome Encode(EncodeJob job, Action<int, string> onProgress, CancellationToken cancel)
         {
             var outcome = new EncodeOutcome();
@@ -109,14 +133,21 @@ namespace MediaRipperEncoder.Services
                 return outcome;
             }
 
-            // -i input -o output --preset-import-file <file> -Z "<name>" --no-metadata --json
+            // -i input -o output --preset-import-file <file> -Z "<name>" [--no-metadata] --json
             // --no-metadata stops HandBrake copying the source's title tag through — MakeMKV
             // stamps the disc label (e.g. "Solo Leveling S1 D2") into every title, which would
             // otherwise show up as the player title for every episode. The correct per-episode
             // title is written afterwards from the file name (see MediaTagWriter).
+            //
+            // The flag is only passed when THIS machine's HandBrakeCLI knows it: 1.4 (the newest
+            // version Windows 7/8 can run) treats any unknown option as fatal and exits before
+            // encoding a single frame — that was the "encode fails instantly on Win7" bug. Without
+            // the flag the stale source title still gets overwritten by our own tagger afterwards,
+            // so older CLIs just lose the belt-and-braces, not the correct result.
             string args = string.Format(CultureInfo.InvariantCulture,
-                "-i \"{0}\" -o \"{1}\" --preset-import-file \"{2}\" -Z \"{3}\" --no-metadata --json",
-                job.InputFile, job.OutputFile, presetPath, presetName);
+                "-i \"{0}\" -o \"{1}\" --preset-import-file \"{2}\" -Z \"{3}\"{4} --json",
+                job.InputFile, job.OutputFile, presetPath, presetName,
+                SupportsNoMetadata() ? " --no-metadata" : "");
 
             Logger.Info("Encode " + job.ShortId + " running: HandBrakeCLI " + args);
 

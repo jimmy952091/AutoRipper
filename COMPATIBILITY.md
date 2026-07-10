@@ -17,13 +17,16 @@ Real-world verified combinations. "Verified" means actually run on hardware, not
 - **HandBrake / HandBrakeCLI: use version 1.4.x** — it's the last release that supports
   Windows 7/8. The 1.4 GUI additionally requires the **.NET 5.0 desktop runtime** (a separate
   Microsoft download; only needed for the GUI — AutoRipper itself only drives the CLI).
-- **Preset portability — DON'T (verified the hard way):** a preset exported from a current
-  HandBrake (1.11.x) *opens* in the 1.4 GUI, but **encoding with HandBrakeCLI 1.4 using that
-  preset file fails immediately** — the GUI converts old/new presets on import; the CLI takes
-  the JSON literally and rejects the newer schema. On Windows 7/8, **re-create your preset in
-  the installed HandBrake 1.4 GUI and export it from there**, then point AutoRipper at that
-  export. (Settings worth copying over by hand: encoder preset *slow*, profile High, level
-  Auto, RF 18, framerate Same-as-source/VFR, no subtitle tracks.)
+- **"Encode fails instantly" on 1.4 — root cause found (log-verified):** AutoRipper versions
+  before 2026-07-09 passed a `--no-metadata` flag that HandBrakeCLI 1.4 doesn't know;
+  1.4 treats unknown options as fatal (`unknown option (--no-metadata)` in the log) and exits
+  before encoding a frame. Current AutoRipper probes the installed CLI and only passes the
+  flag when supported — update AutoRipper if you see this. The earlier suspicion that
+  1.11-exported presets were to blame was wrong: a preset re-exported from the 1.4 GUI
+  imports cleanly (`-Z` accepted in the same log), and 1.11-exported presets have not been
+  proven bad — treat cross-version preset reuse as *untested*, with a same-version export as
+  the safe choice. (Key settings if rebuilding by hand: encoder preset *slow*, profile High,
+  level Auto, RF 18, framerate Same-as-source/VFR, no subtitle tracks.)
 - **MakeMKV: the current version installs and runs on Windows 7 with no issues (verified).**
 
 ## Distributed (two-machine) mode
