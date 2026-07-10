@@ -103,12 +103,23 @@ namespace MediaRipperEncoder.Forms
             };
             link.LinkClicked += (s, e) => OpenUrl("https://www.gnu.org/licenses/agpl-3.0.html");
 
+            // AGPL §13 "appropriate legal notice": the running program tells its users where the
+            // source lives — this matters especially for the network (server node) feature.
+            var sourceLink = new LinkLabel
+            {
+                Text = "Source code: https://github.com/jimmy952091/AutoRipper",
+                AutoSize = true,
+                Margin = new Padding(0, 2, 0, 0)
+            };
+            sourceLink.LinkClicked += (s, e) => OpenUrl("https://github.com/jimmy952091/AutoRipper");
+
             panel.Controls.Add(heading);
             panel.Controls.Add(tagline);
             panel.Controls.Add(version);
             panel.Controls.Add(copyright);
             panel.Controls.Add(licenseLine);
             panel.Controls.Add(link);
+            panel.Controls.Add(sourceLink);
             return panel;
         }
 
