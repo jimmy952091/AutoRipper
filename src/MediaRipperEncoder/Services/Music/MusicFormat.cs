@@ -33,6 +33,10 @@ namespace MediaRipperEncoder.Services.Music
                 new MusicFormat("FLAC — lossless (tested)", "flac", "flac"),
                 new MusicFormat("MP3 — LAME VBR (tested)", "mp3", "mp3"),
                 new MusicFormat("OGG Vorbis — game-player friendly (tested)", "ogg", "ogg"),
+                new MusicFormat("Opus — modern low-bitrate (tested)", "opus", "opus"),
+                new MusicFormat("M4A / AAC — Apple ecosystem (tested; uses Windows' encoder)", "m4a", "m4a"),
+                new MusicFormat("WMA — Windows Media (tested; uses Windows' encoder)", "wma", "wma"),
+                new MusicFormat("AIFF — Apple uncompressed (tested)", "aiff", "aiff"),
                 new MusicFormat("WAV — uncompressed (tested)", "wav", "wav")
             };
         }

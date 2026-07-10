@@ -42,25 +42,13 @@
          msiexec ... INSTALLDESKTOPSHORTCUT=0 -->
     <Property Id="INSTALLDESKTOPSHORTCUT" Value="1" />
 
-    <!-- Application files. -->
+    <!-- Application files: harvested from the staged build output with a wildcard, so new
+         dependencies (e.g. the music-encoder DLLs) can never be silently missing from the MSI.
+         The build script stages the Release output minus debug symbols; the wildcard ships
+         exactly that. LICENSE rides along (must travel with the program; shown in Help > About). -->
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="AutoRipper">
-        <Component Id="MainExecutable">
-          <File Id="AutoRipperExe" Source="$(var.PublishDir)\AutoRipper.exe" KeyPath="yes" />
-        </Component>
-        <Component Id="ExeConfig">
-          <File Source="$(var.PublishDir)\AutoRipper.exe.config" />
-        </Component>
-        <Component Id="NewtonsoftJson">
-          <File Source="$(var.PublishDir)\Newtonsoft.Json.dll" />
-        </Component>
-        <Component Id="TagLibSharp">
-          <File Source="$(var.PublishDir)\TagLibSharp.dll" />
-        </Component>
-        <Component Id="LicenseFile">
-          <!-- The AGPL text must travel with the program (also shown in Help > About). -->
-          <File Source="$(var.PublishDir)\LICENSE" />
-        </Component>
+        <Files Include="$(var.PublishDir)\**" />
       </Directory>
     </StandardDirectory>
 

@@ -19,6 +19,14 @@ if ($LASTEXITCODE -ne 0) { throw "Release build failed." }
 
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 
+# Stage the ship set: everything the build produced except debug symbols. The .wxs harvests
+# this folder with a wildcard, so new dependencies are always packaged automatically.
+$staging = Join-Path $out "staging"
+if (Test-Path $staging) { Remove-Item -Recurse -Force $staging }
+New-Item -ItemType Directory -Path $staging | Out-Null
+Copy-Item (Join-Path $publish "*") $staging -Recurse -Exclude "*.pdb"
+$publish = $staging
+
 & $wix build (Join-Path $PSScriptRoot "AutoRipper.wxs") `
     -ext WixToolset.Netfx.wixext `
     -arch x64 `

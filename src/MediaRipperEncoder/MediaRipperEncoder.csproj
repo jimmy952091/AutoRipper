@@ -65,6 +65,12 @@
     <!-- Pure-managed OGG Vorbis encoder (C# port of the Xiph encoder) — for game-friendly
          .ogg output (UT2004's music player, Audiosurf, etc.). -->
     <PackageReference Include="OggVorbisEncoder" Version="1.2.2" />
+    <!-- Pure-managed Opus encoder + ogg-opus container (Opus requires 48kHz, so CD audio is
+         resampled with NAudio's managed resampler). -->
+    <PackageReference Include="Concentus" Version="2.2.2" />
+    <PackageReference Include="Concentus.Oggfile" Version="1.0.5" />
+    <!-- Media Foundation wrapper: M4A/AAC and WMA use Windows' own built-in encoders. -->
+    <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
   </ItemGroup>
 
 </Project>
