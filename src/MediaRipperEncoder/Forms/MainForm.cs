@@ -476,6 +476,27 @@ namespace MediaRipperEncoder.Forms
                 return;
             }
 
+            // Audio CD? A quick TOC probe (local drives only) answers instantly: only audio CDs
+            // expose CDDA tracks — DVDs/Blu-rays are data discs and yield zero audio tracks. If it
+            // IS an audio CD, the whole MakeMKV path is skipped for the music flow.
+            if (!network)
+            {
+                AudioCdToc toc = null;
+                try
+                {
+                    toc = Services.Music.CdTocReader.Read(letter);
+                }
+                catch
+                {
+                    // No readable TOC this way — fall through to the video scan.
+                }
+                if (toc != null && toc.TrackCount > 0)
+                {
+                    await ScanAudioCd(letter, toc);
+                    return;
+                }
+            }
+
             _scanButton.Enabled = false;
             SetStatus(network
                 ? "Scanning the shared source (" + resolvedSource + ") ... (this can take a minute)"
@@ -526,6 +547,61 @@ namespace MediaRipperEncoder.Forms
                         network ? "" : letter, sourceSpec, network);
                     AddRipJob(job);
                     SetStatus("Queued '" + job.DiscLabel + "' for ripping.", false);
+                }
+                else
+                {
+                    SetStatus("Disc configuration cancelled — nothing queued.", false);
+                }
+            }
+
+            _scanButton.Enabled = true;
+        }
+
+        /// <summary>
+        /// Audio CD flow: identify via MusicBrainz (exact Disc ID, then fuzzy TOC), open the
+        /// same configure form landing on the music panel, and queue the checked tracks
+        /// through the same two queues as video.
+        /// </summary>
+        private async System.Threading.Tasks.Task ScanAudioCd(string letter, AudioCdToc toc)
+        {
+            _scanButton.Enabled = false;
+            SetStatus("Audio CD detected (" + toc.TrackCount + " tracks) — identifying on MusicBrainz...", false);
+
+            List<MusicRelease> candidates;
+            try
+            {
+                candidates = await System.Threading.Tasks.Task.Run(() =>
+                {
+                    var client = new Services.Music.MusicBrainzClient();
+                    string discId = Services.Music.MusicBrainzDiscId.Compute(toc);
+                    var found = client.LookupByDiscIdAsync(discId).GetAwaiter().GetResult();
+                    if (found.Count == 0)
+                    {
+                        // This exact pressing isn't in the database — fuzzy-match the TOC.
+                        found = client.LookupByTocAsync(toc).GetAwaiter().GetResult();
+                    }
+                    return found;
+                });
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("MusicBrainz identification failed.", ex);
+                candidates = new List<MusicRelease>(); // form offers the typed search
+            }
+
+            SetStatus(candidates.Count > 0
+                ? "Found " + candidates.Count + " matching release(s). Confirm the edition and tracks..."
+                : "Disc not recognized automatically — search by artist/album in the next screen.", false);
+
+            using (var form = new MetadataEntryForm(CreateProvider(), _settings,
+                new List<DiscTitle>(), DiscType.Cd, toc, candidates))
+            {
+                if (form.ShowDialog(this) == DialogResult.OK && form.MusicResult != null)
+                {
+                    RipJob job = _pipeline.StartMusicJob(form.MusicResult, toc, letter, _settings.MusicFormatId);
+                    AddRipJob(job);
+                    SetStatus("Queued '" + job.DiscLabel + "' — " + job.TitleResults.Count +
+                        " track(s) to rip.", false);
                 }
                 else
                 {

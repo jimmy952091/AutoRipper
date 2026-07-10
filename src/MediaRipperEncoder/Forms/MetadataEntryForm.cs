@@ -7,6 +7,7 @@ using System.Windows.Forms;
 using MediaRipperEncoder.Models;
 using MediaRipperEncoder.Services;
 using MediaRipperEncoder.Services.Metadata;
+using MediaRipperEncoder.Services.Music;
 
 namespace MediaRipperEncoder.Forms
 {
@@ -48,6 +49,22 @@ namespace MediaRipperEncoder.Forms
         private NumericUpDown _segmentsPerTitle;
         private DataGridView _grid;
 
+        // Music controls
+        private Label _musicStatus;
+        private ComboBox _musicReleaseCombo;
+        private TextBox _musicArtistBox;
+        private TextBox _musicAlbumBox;
+        private CheckedListBox _musicTracks;
+        private Label _musicFormatNote;
+
+        // Music state
+        private AudioCdToc _toc;
+        private List<MusicRelease> _musicCandidates = new List<MusicRelease>();
+        private readonly MusicBrainzClient _musicClient = new MusicBrainzClient();
+
+        /// <summary>The confirmed release with track Selected flags applied. Null until OK in music mode.</summary>
+        public MusicRelease MusicResult { get; private set; }
+
         private Button _okButton;
 
         // Confirmed lookup state
@@ -60,11 +77,13 @@ namespace MediaRipperEncoder.Forms
         public MediaMetadata Result { get; private set; }
 
         public MetadataEntryForm(IMetadataProvider provider, AppSettings settings,
-            List<DiscTitle> titles, DiscType initialDiscType)
+            List<DiscTitle> titles, DiscType initialDiscType,
+            AudioCdToc toc = null, List<MusicRelease> musicCandidates = null)
         {
             _provider = provider;
             _settings = settings;
             _titles = titles ?? new List<DiscTitle>();
+            _toc = toc;
 
             Text = "Disc details — " + AppInfo.DisplayName;
             StartPosition = FormStartPosition.CenterScreen;
@@ -76,6 +95,16 @@ namespace MediaRipperEncoder.Forms
             BuildTvPanel();
             BuildMusicPanel();
             BuildFooter();
+
+            // Audio CD flow: the main window already read the TOC and did the MusicBrainz
+            // lookup — land straight on the music panel with the candidates loaded.
+            if (toc != null)
+            {
+                _mediaTypeCombo.SelectedIndex = (int)MediaType.Music;
+                _musicFormatNote.Text = "Output: " +
+                    MusicFormat.ById(settings.MusicFormatId).DisplayName + "  (change in Settings > Music)";
+                SetMusicCandidates(musicCandidates, "matched from the disc");
+            }
 
             UpdateVisiblePanel();
         }
@@ -360,18 +389,189 @@ namespace MediaRipperEncoder.Forms
 
         private void BuildMusicPanel()
         {
-            _musicPanel = new Panel { Location = new Point(15, 90), Size = new Size(725, 200) };
-            var note = new Label
+            _musicPanel = new Panel
             {
-                Text = "Music is ripped in its own dedicated window (audio CDs use a different tool " +
-                       "than MakeMKV/HandBrake). Use the \"Rip Music\" button on the main window " +
-                       "instead of this screen.",
-                AutoSize = false,
-                Location = new Point(0, 10),
-                Size = new Size(700, 60)
+                Location = new Point(15, 90),
+                Size = new Size(725, 470),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom
             };
-            _musicPanel.Controls.Add(note);
+
+            _musicStatus = new Label
+            {
+                Text = "Insert an audio CD and use \"Scan disc && configure\" — the disc is identified " +
+                       "automatically from its table of contents (MusicBrainz).",
+                AutoSize = false,
+                Location = new Point(0, 4),
+                Size = new Size(720, 34)
+            };
+
+            var releaseLabel = new Label { Text = "Matched release:", AutoSize = true, Location = new Point(0, 44) };
+            _musicReleaseCombo = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Location = new Point(110, 40),
+                Size = new Size(610, 23),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+            _musicReleaseCombo.SelectedIndexChanged += (s, e) => LoadMusicTracks();
+
+            // Manual fallback for discs MusicBrainz can't identify automatically.
+            var artistLabel = new Label { Text = "Artist:", AutoSize = true, Location = new Point(0, 76) };
+            _musicArtistBox = new TextBox { Location = new Point(110, 72), Size = new Size(180, 23) };
+            var albumLabel = new Label { Text = "Album:", AutoSize = true, Location = new Point(305, 76) };
+            _musicAlbumBox = new TextBox { Location = new Point(355, 72), Size = new Size(200, 23) };
+            var searchButton = new Button { Text = "Search", Location = new Point(565, 71), Size = new Size(90, 25) };
+            searchButton.Click += OnMusicSearch;
+
+            var tracksLabel = new Label
+            {
+                Text = "Tracks — only checked tracks are ripped:",
+                AutoSize = true,
+                Location = new Point(0, 108)
+            };
+
+            _musicTracks = new CheckedListBox
+            {
+                Location = new Point(0, 128),
+                Size = new Size(720, 260),
+                CheckOnClick = true,
+                IntegralHeight = false,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom
+            };
+
+            var selectAll = new Button { Text = "Select all", Size = new Size(85, 26), Location = new Point(0, 396), Anchor = AnchorStyles.Bottom | AnchorStyles.Left };
+            var deselectAll = new Button { Text = "Deselect all", Size = new Size(90, 26), Location = new Point(92, 396), Anchor = AnchorStyles.Bottom | AnchorStyles.Left };
+            selectAll.Click += (s, e) => SetAllMusicTracks(true);
+            deselectAll.Click += (s, e) => SetAllMusicTracks(false);
+
+            _musicFormatNote = new Label
+            {
+                AutoSize = true,
+                Location = new Point(200, 401),
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Left
+            };
+
+            _musicPanel.Controls.Add(_musicStatus);
+            _musicPanel.Controls.Add(releaseLabel);
+            _musicPanel.Controls.Add(_musicReleaseCombo);
+            _musicPanel.Controls.Add(artistLabel);
+            _musicPanel.Controls.Add(_musicArtistBox);
+            _musicPanel.Controls.Add(albumLabel);
+            _musicPanel.Controls.Add(_musicAlbumBox);
+            _musicPanel.Controls.Add(searchButton);
+            _musicPanel.Controls.Add(tracksLabel);
+            _musicPanel.Controls.Add(_musicTracks);
+            _musicPanel.Controls.Add(selectAll);
+            _musicPanel.Controls.Add(deselectAll);
+            _musicPanel.Controls.Add(_musicFormatNote);
             Controls.Add(_musicPanel);
+        }
+
+        // ---------------- music mode logic ----------------
+
+        /// <summary>Populates the release dropdown with candidates (from disc lookup or search).</summary>
+        private void SetMusicCandidates(List<MusicRelease> candidates, string sourceDescription)
+        {
+            _musicCandidates = candidates ?? new List<MusicRelease>();
+            _musicReleaseCombo.BeginUpdate();
+            _musicReleaseCombo.Items.Clear();
+            foreach (MusicRelease r in _musicCandidates)
+            {
+                _musicReleaseCombo.Items.Add(
+                    r.Artist + " — " + r.Album + (string.IsNullOrEmpty(r.Year) ? "" : " (" + r.Year + ")") +
+                    (string.IsNullOrEmpty(r.Detail) ? "" : "   [" + r.Detail + "]"));
+            }
+            _musicReleaseCombo.EndUpdate();
+
+            if (_musicCandidates.Count > 0)
+            {
+                SetMatchLabel(_musicStatus, _musicCandidates.Count + " release(s) " + sourceDescription +
+                    " — pick the edition that matches your case/booklet, then confirm the tracks.", OkColor);
+                _musicReleaseCombo.SelectedIndex = 0; // triggers LoadMusicTracks
+            }
+            else
+            {
+                SetMatchLabel(_musicStatus, "No match " + sourceDescription +
+                    " — type the artist and album and press Search.", WarnColor);
+            }
+        }
+
+        /// <summary>Fills the checkbox list from the chosen release (all tracks checked, per spec).</summary>
+        private async void LoadMusicTracks()
+        {
+            int index = _musicReleaseCombo.SelectedIndex;
+            if (index < 0 || index >= _musicCandidates.Count) { return; }
+            MusicRelease release = _musicCandidates[index];
+
+            // Search results are shallow (no track list) — fetch detail on first selection.
+            if (release.Tracks.Count == 0 && !string.IsNullOrEmpty(release.ReleaseId))
+            {
+                try
+                {
+                    SetMatchLabel(_musicStatus, "Loading track list...", OkColor);
+                    MusicRelease detail = await _musicClient.GetReleaseDetailAsync(release.ReleaseId, null);
+                    if (detail != null && detail.Tracks.Count > 0)
+                    {
+                        release.Tracks = detail.Tracks;
+                        release.DiscCount = detail.DiscCount;
+                        release.DiscNumber = detail.DiscNumber;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    SetMatchLabel(_musicStatus, "Couldn't load the track list: " + ex.Message, FailColor);
+                    return;
+                }
+            }
+
+            _musicTracks.BeginUpdate();
+            _musicTracks.Items.Clear();
+            foreach (AudioTrack t in release.Tracks)
+            {
+                _musicTracks.Items.Add(t.Number.ToString("00") + "  " + t.Title + "   (" + t.LengthText + ")",
+                    t.Selected);
+            }
+            _musicTracks.EndUpdate();
+
+            SetMatchLabel(_musicStatus, release.Artist + " — " + release.Album +
+                (string.IsNullOrEmpty(release.Year) ? "" : " (" + release.Year + ")") +
+                ": " + release.Tracks.Count + " tracks" +
+                (release.DiscCount > 1 ? " (disc " + release.DiscNumber + " of " + release.DiscCount + ")" : "") +
+                ". Uncheck anything you don't want.", OkColor);
+        }
+
+        private void SetAllMusicTracks(bool selected)
+        {
+            for (int i = 0; i < _musicTracks.Items.Count; i++) { _musicTracks.SetItemChecked(i, selected); }
+        }
+
+        private async void OnMusicSearch(object sender, EventArgs e)
+        {
+            string artist = _musicArtistBox.Text.Trim();
+            string album = _musicAlbumBox.Text.Trim();
+            if (album.Length == 0)
+            {
+                MessageBox.Show(this, "Enter at least the album name.", "Search",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var button = sender as Button;
+            if (button != null) { button.Enabled = false; }
+            try
+            {
+                SetMatchLabel(_musicStatus, "Searching MusicBrainz...", OkColor);
+                List<MusicRelease> found = await _musicClient.SearchReleasesAsync(artist, album);
+                SetMusicCandidates(found, "found by search");
+            }
+            catch (Exception ex)
+            {
+                SetMatchLabel(_musicStatus, "Search failed: " + ex.Message, FailColor);
+            }
+            finally
+            {
+                if (button != null) { button.Enabled = true; }
+            }
         }
 
         // ---------------- footer ----------------
@@ -672,9 +872,7 @@ namespace MediaRipperEncoder.Forms
 
             if (type == MediaType.Music)
             {
-                MessageBox.Show(this,
-                    "Music is handled in the dedicated Rip Music window, not here.",
-                    "Music", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                ConfirmMusic();
                 return;
             }
 
@@ -801,11 +999,83 @@ namespace MediaRipperEncoder.Forms
 
         private static readonly Color OkColor = Color.FromArgb(0, 128, 0);
         private static readonly Color FailColor = Color.FromArgb(180, 0, 0);
+        private static readonly Color WarnColor = Color.FromArgb(176, 96, 0);
 
         private void SetMatchLabel(Label label, string text, Color color)
         {
             label.Text = text;
             label.ForeColor = color;
+        }
+
+        /// <summary>
+        /// Music OK: validates the confirmed release + checked tracks, applies the checkbox
+        /// states onto the release, and closes with MusicResult set. Same explicit-confirm
+        /// rule as video: nothing proceeds on a guess.
+        /// </summary>
+        private void ConfirmMusic()
+        {
+            if (_toc == null)
+            {
+                MessageBox.Show(this,
+                    "To rip an audio CD, insert it and use \"Scan disc && configure\" from the main " +
+                    "window — the disc is identified from its table of contents.",
+                    "Music", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            int index = _musicReleaseCombo.SelectedIndex;
+            if (index < 0 || index >= _musicCandidates.Count)
+            {
+                MessageBox.Show(this, "Pick (or search for) the release that matches your disc first.",
+                    "Music", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            MusicRelease release = _musicCandidates[index];
+            if (release.Tracks.Count == 0)
+            {
+                MessageBox.Show(this, "This release has no track list yet — pick it again or search.",
+                    "Music", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            // The checkbox list is authoritative: copy its state onto the release.
+            for (int i = 0; i < release.Tracks.Count && i < _musicTracks.Items.Count; i++)
+            {
+                release.Tracks[i].Selected = _musicTracks.GetItemChecked(i);
+            }
+
+            int selected = 0;
+            foreach (AudioTrack t in release.Tracks) { if (t.Selected) { selected++; } }
+            if (selected == 0)
+            {
+                MessageBox.Show(this, "Every track is unchecked — check at least one track to rip.",
+                    "Music", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            // Sanity: warn (don't block) when the picked edition's track count differs from the
+            // physical disc — the wrong edition means wrong titles on the files.
+            if (release.Tracks.Count != _toc.TrackCount)
+            {
+                DialogResult answer = MessageBox.Show(this,
+                    "The disc has " + _toc.TrackCount + " tracks but the selected edition lists " +
+                    release.Tracks.Count + ". This is usually the WRONG edition — titles may not " +
+                    "line up.\r\n\r\nUse it anyway?",
+                    "Track count mismatch", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                if (answer != DialogResult.Yes) { return; }
+            }
+
+            MusicResult = release;
+            Result = new MediaMetadata
+            {
+                DiscType = DiscType.Cd,
+                MediaType = MediaType.Music,
+                MatchConfirmed = true,
+                MovieTitle = release.Artist + " — " + release.Album
+            };
+            DialogResult = DialogResult.OK;
+            Close();
         }
     }
 }

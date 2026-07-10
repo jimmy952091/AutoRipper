@@ -30,6 +30,9 @@ namespace MediaRipperEncoder.Forms
         // Appearance tab.
         private ComboBox _themeCombo;
 
+        // Music tab.
+        private ComboBox _musicFormatCombo;
+
         public SettingsForm(AppSettings settings)
         {
             _settings = settings;
@@ -69,12 +72,17 @@ namespace MediaRipperEncoder.Forms
             var appearanceTab = new TabPage("Appearance");
             appearanceTab.Controls.Add(BuildAppearancePanel(settings));
 
+            // --- Music tab: output format ---
+            var musicTab = new TabPage("Music");
+            musicTab.Controls.Add(BuildMusicPanel(settings));
+
             // --- Advanced tab: network / mapped-drive rip source ---
             var advancedTab = new TabPage("Advanced");
             advancedTab.Controls.Add(BuildAdvancedPanel(settings));
 
             tabs.TabPages.Add(generalTab);
             tabs.TabPages.Add(appearanceTab);
+            tabs.TabPages.Add(musicTab);
             tabs.TabPages.Add(advancedTab);
 
             layout.Controls.Add(tabs, 0, 0);
@@ -126,6 +134,66 @@ namespace MediaRipperEncoder.Forms
             panel.Controls.Add(themeLabel);
             panel.Controls.Add(_themeCombo);
             panel.Controls.Add(blurb);
+            return panel;
+        }
+
+        private Control BuildMusicPanel(AppSettings settings)
+        {
+            var panel = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(14) };
+
+            var heading = new Label
+            {
+                Text = "Music ripping (audio CDs)",
+                Font = new Font(Font, FontStyle.Bold),
+                AutoSize = true,
+                Location = new Point(14, 14)
+            };
+
+            var blurb = new Label
+            {
+                Text = "Audio CD ripping is BUILT IN — no extra program needed. Insert a music CD and use " +
+                       "\"Scan disc && configure\" like any other disc: the album is identified from the disc " +
+                       "itself (MusicBrainz), you confirm the edition and tracks, and files land in your Music " +
+                       "library folder with full tags and cover art.",
+                AutoSize = false,
+                Location = new Point(14, 40),
+                Size = new Size(660, 64)
+            };
+
+            var formatLabel = new Label { Text = "Output format:", AutoSize = true, Location = new Point(14, 112) };
+            _musicFormatCombo = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Location = new Point(120, 108),
+                Size = new Size(280, 23)
+            };
+            System.Collections.Generic.List<Services.Music.MusicFormat> formats = Services.Music.MusicFormat.All();
+            int selected = 0;
+            for (int i = 0; i < formats.Count; i++)
+            {
+                _musicFormatCombo.Items.Add(formats[i]);
+                if (formats[i].FormatId.Equals(settings.MusicFormatId ?? "flac", StringComparison.OrdinalIgnoreCase))
+                {
+                    selected = i;
+                }
+            }
+            _musicFormatCombo.SelectedIndex = selected;
+
+            var formatBlurb = new Label
+            {
+                Text = "FLAC is the archival choice: identical audio to the CD at roughly two-thirds the size, " +
+                       "and every media server plays it. \"(tested)\" marks formats verified against a real CD — " +
+                       "additional formats may arrive in future updates.",
+                AutoSize = false,
+                Location = new Point(14, 144),
+                Size = new Size(660, 48)
+            };
+
+            panel.Controls.Add(heading);
+            panel.Controls.Add(blurb);
+            panel.Controls.Add(formatLabel);
+            panel.Controls.Add(_musicFormatCombo);
+            panel.Controls.Add(formatBlurb);
             return panel;
         }
 
@@ -277,6 +345,9 @@ namespace MediaRipperEncoder.Forms
             _settings.NetworkRipSearchSubfolders = _networkRipSearchSubfolders.Checked;
 
             _settings.Theme = (ThemePreference)_themeCombo.SelectedIndex;
+
+            var musicFormat = _musicFormatCombo.SelectedItem as Services.Music.MusicFormat;
+            _settings.MusicFormatId = musicFormat != null ? musicFormat.FormatId : "flac";
 
             // Node role/host/port/secret are deliberately NOT touched here — Edit > ES Connection
             // owns them now, so this dialog can never clobber what was configured there.
