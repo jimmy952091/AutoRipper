@@ -49,8 +49,11 @@ namespace MediaRipperEncoder.Services.Music
             }
             catch (Exception ex)
             {
-                // A 404 here just means "unknown disc" — that's the normal fallback path, not an error.
-                Logger.Info("MusicBrainz discid lookup returned nothing (" + ex.Message + ").");
+                // A 404 here just means "unknown disc" — that's the normal fallback path, not an
+                // error. Anything else (TLS, missing root cert, DNS) gets the FULL exception chain
+                // logged: the outer message alone ("An error occurred while sending the request")
+                // told us nothing when a Win7 machine couldn't reach MusicBrainz.
+                Logger.Info("MusicBrainz discid lookup returned nothing: " + DescribeChain(ex));
                 return new List<MusicRelease>();
             }
             return ParseDiscIdResponse(json, discId);
@@ -78,7 +81,7 @@ namespace MediaRipperEncoder.Services.Music
             }
             catch (Exception ex)
             {
-                Logger.Info("MusicBrainz TOC lookup returned nothing (" + ex.Message + ").");
+                Logger.Info("MusicBrainz TOC lookup returned nothing: " + DescribeChain(ex));
                 return new List<MusicRelease>();
             }
             return ParseDiscIdResponse(json, null);
@@ -124,6 +127,24 @@ namespace MediaRipperEncoder.Services.Music
                 Logger.Info("Cover art unavailable for " + releaseId + " (" + ex.Message + ").");
                 return null;
             }
+        }
+
+        /// <summary>
+        /// Flattens an exception chain into one diagnosable line — the inner exceptions are where
+        /// HTTPS failures explain themselves (e.g. "The remote certificate is invalid" = a missing
+        /// root certificate on old Windows; "secure channel" = TLS negotiation).
+        /// </summary>
+        public static string DescribeChain(Exception ex)
+        {
+            var sb = new System.Text.StringBuilder();
+            Exception current = ex;
+            while (current != null)
+            {
+                if (sb.Length > 0) { sb.Append(" -> "); }
+                sb.Append(current.GetType().Name).Append(": ").Append(current.Message);
+                current = current.InnerException;
+            }
+            return sb.ToString();
         }
 
         private async Task<string> GetAsync(string url)

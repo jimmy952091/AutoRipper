@@ -48,7 +48,26 @@ The About box already shows the license + copyright. When the source is public, 
 repository URL to the About box ("source code available at ...") so network users of the
 server node can find the source — that completes the §13 "appropriate legal notice."
 
-## 6. After release
+## 6. Package managers (all free; do after a Release exists)
+
+A desktop app belongs in APP package managers — NOT NuGet (that's for .NET *libraries*;
+an MSI there would help no one). The right registries, all free:
+
+- **winget** (Microsoft's, built into Win10/11 — the big one): PR a manifest to
+  `microsoft/winget-pkgs` pointing at the GitHub Release MSI URL + its SHA-256 (GitHub
+  shows the digest on the release asset). Easiest via the `wingetcreate` tool. Users then:
+  `winget install AutoRipper`.
+- **Chocolatey** (community repo): free account, push a package whose install script pulls
+  the MSI. `choco install autoripper`.
+- **Scoop**: JSON manifest in a bucket (or petition the `extras` bucket). `scoop install autoripper`.
+- Update manifests each release (URL + hash change).
+
+**Linux reality check:** apt/dnf/pacman package *native Linux* software — they won't carry a
+Windows app. The honest Linux story is "runs under Wine, install the MSI" (see COMPATIBILITY),
+not a deb/rpm. If demand appears someday, a Flatpak that bundles Wine is the theoretical route,
+but it's heavy and not worth it before there's an audience.
+
+## 7. After release
 
 - Watch for Defender FP reports from users; resubmit new builds to the portal as needed.
 - TheTVDB/OMDb keys are per-user by design — never ship keys in a release.

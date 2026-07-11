@@ -28,6 +28,14 @@ Real-world verified combinations. "Verified" means actually run on hardware, not
   the safe choice. (Key settings if rebuilding by hand: encoder preset *slow*, profile High,
   level Auto, RF 18, framerate Same-as-source/VFR, no subtitle tracks.)
 - **MakeMKV: the current version installs and runs on Windows 7 with no issues (verified).**
+- **MusicBrainz (audio-CD lookup) on Windows 7:** likely fails on machines missing modern root
+  certificates. MusicBrainz uses Let's Encrypt HTTPS certificates; a Windows 7 install that
+  hasn't received root-certificate updates doesn't trust their root (**ISRG Root X1**), so the
+  connection is refused while other sites (different certificate chains) still work. Fix:
+  download `isrgrootx1.der` from https://letsencrypt.org/certificates/ on any machine, copy it
+  over, double-click → Install Certificate → Local Machine → "Trusted Root Certification
+  Authorities". The app's log (`%AppData%\AutoRipper\logs`) names the exact cause — "remote
+  certificate is invalid" confirms this; "secure channel" failures are TLS instead.
 
 ## Distributed (two-machine) mode
 

@@ -238,6 +238,14 @@ namespace MediaRipperEncoder.Forms
             // season -> episode 7), so the user isn't stuck re-numbering from episode 1 by hand.
             _discNumber.ValueChanged += (s, e) => SuggestFirstEpisodeForDisc();
 
+            // Changing the season re-pulls that season's episode list (a confirmed series only —
+            // before that there's nothing to reload). Without this, picking "Season 7" after the
+            // lookup left season 1's episodes in the grid.
+            _season.ValueChanged += async (s, e) =>
+            {
+                if (!string.IsNullOrEmpty(_confirmedSeriesId)) { await ReloadEpisodesAsync(); }
+            };
+
             var lookup = new Button { Text = "Look up...", Location = new Point(0, 36), Size = new Size(110, 26) };
             lookup.Click += OnLookupSeries;
 
@@ -282,6 +290,9 @@ namespace MediaRipperEncoder.Forms
                 Maximum = 999,
                 Value = 1
             };
+            // Re-number the grid the moment the user edits this — previously the edit did nothing
+            // until the Auto-number button was clicked, which read as "it ignored my change".
+            _firstEpisode.ValueChanged += (s, e) => AutoNumberEpisodes();
 
             var segLabel = new Label { Text = "Segments/title:", AutoSize = true, Location = new Point(160, 114) };
             _segmentsPerTitle = new NumericUpDown
@@ -292,6 +303,7 @@ namespace MediaRipperEncoder.Forms
                 Maximum = 5,
                 Value = 1
             };
+            _segmentsPerTitle.ValueChanged += (s, e) => AutoNumberEpisodes();
 
             var autoNumber = new Button { Text = "Auto-number", Location = new Point(315, 109), Size = new Size(100, 26) };
             autoNumber.Click += (s, e) => AutoNumberEpisodes();
