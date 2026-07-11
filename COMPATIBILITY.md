@@ -28,14 +28,15 @@ Real-world verified combinations. "Verified" means actually run on hardware, not
   the safe choice. (Key settings if rebuilding by hand: encoder preset *slow*, profile High,
   level Auto, RF 18, framerate Same-as-source/VFR, no subtitle tracks.)
 - **MakeMKV: the current version installs and runs on Windows 7 with no issues (verified).**
-- **MusicBrainz (audio-CD lookup) on Windows 7:** likely fails on machines missing modern root
-  certificates. MusicBrainz uses Let's Encrypt HTTPS certificates; a Windows 7 install that
-  hasn't received root-certificate updates doesn't trust their root (**ISRG Root X1**), so the
-  connection is refused while other sites (different certificate chains) still work. Fix:
-  download `isrgrootx1.der` from https://letsencrypt.org/certificates/ on any machine, copy it
-  over, double-click → Install Certificate → Local Machine → "Trusted Root Certification
-  Authorities". The app's log (`%AppData%\AutoRipper\logs`) names the exact cause — "remote
-  certificate is invalid" confirms this; "secure channel" failures are TLS instead.
+- **MusicBrainz (audio-CD lookup) on Windows 7: fixed in-app.** Old Windows installs that don't
+  receive automatic root-certificate updates lack roots issued after ~2009 — and MusicBrainz's
+  chain terminates in **DigiCert Global Root G2 (issued 2013, newer than Windows 7 itself)**,
+  so the connection failed while other sites with older chains worked. AutoRipper now embeds
+  the genuine DigiCert Global Root G2 and ISRG Root X1 (Let's Encrypt) roots as pinned fallback
+  trust anchors: chains rejected *only* for an unknown root are re-verified against these exact
+  roots (all other TLS errors still fail — validation is not weakened). No user action needed;
+  the log notes when the fallback engages. If a lookup still fails, the log
+  (`%AppData%\AutoRipper\logs`) prints the full error chain naming the cause.
 
 ## Distributed (two-machine) mode
 
