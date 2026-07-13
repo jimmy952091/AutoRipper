@@ -138,6 +138,8 @@ namespace MediaRipperEncoder.Forms
             };
             _discTypeCombo.Items.AddRange(new object[] { "DVD", "Blu-ray", "UHD Blu-ray", "CD (audio)" });
             _discTypeCombo.SelectedIndex = (int)initialDiscType;
+            // UHD discs use the UHD presets, other disc types the standard ones — repopulate on change.
+            _discTypeCombo.SelectedIndexChanged += (s, e) => PopulatePresetCombo();
 
             var mediaLabel = new Label { Text = "Media type:", AutoSize = true, Location = new Point(290, 18) };
             _mediaTypeCombo = new ComboBox
@@ -175,15 +177,29 @@ namespace MediaRipperEncoder.Forms
         private void PopulatePresetCombo()
         {
             var names = new List<string>();
+            bool uhd = SelectedDiscType == DiscType.UhdBluRay;
 
-            string general = PresetInfo.GetPresetName(_settings.HandBrakePresetPath);
+            // UHD discs offer the UHD presets; other disc types the standard ones. If a UHD disc
+            // has no UHD preset configured, fall back to the standard presets so the user isn't
+            // stuck (with a clear label reminding them to set a proper UHD preset).
+            string generalPath = uhd ? _settings.HandBrakeUhdPresetPath : _settings.HandBrakePresetPath;
+            string animPath = uhd ? _settings.HandBrakeUhdAnimationPresetPath : _settings.HandBrakeAnimationPresetPath;
+
+            string general = PresetInfo.GetPresetName(generalPath);
+            string animation = PresetInfo.GetPresetName(animPath);
+
+            if (uhd && string.IsNullOrEmpty(general) && string.IsNullOrEmpty(animation))
+            {
+                // No UHD preset set — fall back to standard presets.
+                general = PresetInfo.GetPresetName(_settings.HandBrakePresetPath);
+                animation = PresetInfo.GetPresetName(_settings.HandBrakeAnimationPresetPath);
+            }
+
             if (!string.IsNullOrEmpty(general)) { names.Add(general); }
-
-            string animation = PresetInfo.GetPresetName(_settings.HandBrakeAnimationPresetPath);
             if (!string.IsNullOrEmpty(animation)) { names.Add(animation); }
-
             if (names.Count == 0) { names.Add("(default preset)"); }
 
+            _presetCombo.Items.Clear();
             _presetCombo.Items.AddRange(names.Cast<object>().ToArray());
             _presetCombo.SelectedIndex = 0;
         }

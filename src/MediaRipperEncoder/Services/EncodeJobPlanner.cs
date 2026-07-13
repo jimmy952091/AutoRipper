@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using MediaRipperEncoder.Models;
 
@@ -23,12 +24,30 @@ namespace MediaRipperEncoder.Services
         private readonly string _outputExtension;
         private readonly string _generalPresetPath;
         private readonly string _generalPresetName;
-        private readonly string _animationPresetPath;
-        private readonly string _animationPresetName;
 
+        // The chosen preset is resolved by NAME (meta.PresetName, set by the per-disc screen), so
+        // one map covers general/animation/UHD/UHD-animation. The remote server rebuilds its own
+        // planner from ITS settings and resolves the same name to its own path — names match
+        // because the user exports the same presets to each machine.
+        private readonly Dictionary<string, string> _presetPathByName;
+        private readonly HashSet<string> _animationPresetNames;
+
+        /// <summary>Standard-definition constructor (general + animation). Kept for existing callers/tests.</summary>
         public EncodeJobPlanner(string moviesRoot, string tvRoot, string tempFolder, string outputExtension,
             string generalPresetPath, string generalPresetName,
             string animationPresetPath, string animationPresetName)
+            : this(moviesRoot, tvRoot, tempFolder, outputExtension,
+                   generalPresetPath, generalPresetName, animationPresetPath, animationPresetName,
+                   "", "", "", "")
+        {
+        }
+
+        /// <summary>Full constructor including the UHD (4K) preset variants.</summary>
+        public EncodeJobPlanner(string moviesRoot, string tvRoot, string tempFolder, string outputExtension,
+            string generalPresetPath, string generalPresetName,
+            string animationPresetPath, string animationPresetName,
+            string uhdPresetPath, string uhdPresetName,
+            string uhdAnimationPresetPath, string uhdAnimationPresetName)
         {
             _moviesRoot = moviesRoot;
             _tvRoot = tvRoot;
@@ -36,8 +55,24 @@ namespace MediaRipperEncoder.Services
             _outputExtension = string.IsNullOrEmpty(outputExtension) ? "mp4" : outputExtension;
             _generalPresetPath = generalPresetPath;
             _generalPresetName = generalPresetName;
-            _animationPresetPath = animationPresetPath;
-            _animationPresetName = animationPresetName;
+
+            _presetPathByName = new Dictionary<string, string>(StringComparer.Ordinal);
+            Register(generalPresetName, generalPresetPath);
+            Register(animationPresetName, animationPresetPath);
+            Register(uhdPresetName, uhdPresetPath);
+            Register(uhdAnimationPresetName, uhdAnimationPresetPath);
+
+            _animationPresetNames = new HashSet<string>(StringComparer.Ordinal);
+            if (!string.IsNullOrEmpty(animationPresetName)) { _animationPresetNames.Add(animationPresetName); }
+            if (!string.IsNullOrEmpty(uhdAnimationPresetName)) { _animationPresetNames.Add(uhdAnimationPresetName); }
+        }
+
+        private void Register(string name, string path)
+        {
+            if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(path))
+            {
+                _presetPathByName[name] = path;
+            }
         }
 
         /// <summary>Builds a planner from settings, resolving preset names + output container via PresetInfo.</summary>
@@ -47,7 +82,30 @@ namespace MediaRipperEncoder.Services
                 s.MoviesRoot, s.TvShowsRoot, s.TempFolder,
                 PresetInfo.GetContainerExtension(s.HandBrakePresetPath),
                 s.HandBrakePresetPath, PresetInfo.GetPresetName(s.HandBrakePresetPath),
-                s.HandBrakeAnimationPresetPath, PresetInfo.GetPresetName(s.HandBrakeAnimationPresetPath));
+                s.HandBrakeAnimationPresetPath, PresetInfo.GetPresetName(s.HandBrakeAnimationPresetPath),
+                s.HandBrakeUhdPresetPath, PresetInfo.GetPresetName(s.HandBrakeUhdPresetPath),
+                s.HandBrakeUhdAnimationPresetPath, PresetInfo.GetPresetName(s.HandBrakeUhdAnimationPresetPath));
+        }
+
+        /// <summary>Resolves the chosen preset name to its file path; falls back to the general preset.</summary>
+        private string ResolvePresetPath(string presetName)
+        {
+            string path;
+            if (!string.IsNullOrEmpty(presetName) && _presetPathByName != null &&
+                _presetPathByName.TryGetValue(presetName, out path))
+            {
+                return path;
+            }
+            return _generalPresetPath;
+        }
+
+        /// <summary>The output container extension of the chosen preset (e.g. mp4 vs mkv), general as fallback.</summary>
+        private string ResolveExtension(string presetName)
+        {
+            string path = ResolvePresetPath(presetName);
+            if (string.Equals(path, _generalPresetPath, StringComparison.Ordinal)) { return _outputExtension; }
+            string ext = PresetInfo.GetContainerExtension(path);
+            return string.IsNullOrEmpty(ext) ? _outputExtension : ext;
         }
 
         /// <summary>
@@ -59,11 +117,12 @@ namespace MediaRipperEncoder.Services
             LibraryTarget target = BuildTargetFor(meta, titleIndex);
             if (target == null) { return null; }
 
-            bool useAnimation = !string.IsNullOrEmpty(_animationPresetName) &&
-                                string.Equals(meta.PresetName, _animationPresetName, StringComparison.Ordinal);
-
-            string presetPath = useAnimation ? _animationPresetPath : _generalPresetPath;
-            string presetName = useAnimation ? _animationPresetName : _generalPresetName;
+            // Resolve the chosen preset by name (general/animation/UHD/UHD-animation). If the disc
+            // didn't name a preset, or it isn't configured on this machine, fall back to general.
+            string presetName = !string.IsNullOrEmpty(meta.PresetName) &&
+                                 _presetPathByName != null && _presetPathByName.ContainsKey(meta.PresetName)
+                ? meta.PresetName : _generalPresetName;
+            string presetPath = ResolvePresetPath(presetName);
 
             // Encode to a staging file first, then move into the library with overwrite protection —
             // so a partial encode never appears in the library.
@@ -90,12 +149,16 @@ namespace MediaRipperEncoder.Services
         /// </summary>
         public bool IsAnimationChoice(MediaMetadata meta)
         {
-            return !string.IsNullOrEmpty(_animationPresetName) && meta != null &&
-                   string.Equals(meta.PresetName, _animationPresetName, StringComparison.Ordinal);
+            return meta != null && _animationPresetNames != null &&
+                   !string.IsNullOrEmpty(meta.PresetName) && _animationPresetNames.Contains(meta.PresetName);
         }
 
         public LibraryTarget BuildTargetFor(MediaMetadata meta, int titleIndex)
         {
+            // Use the CHOSEN preset's container (mp4 vs mkv) — a UHD preset may output a
+            // different container than the standard one.
+            string ext = ResolveExtension(meta.PresetName);
+
             if (meta.MediaType == MediaType.Movie)
             {
                 // Multi-movie (double-feature) disc: each title is a distinct film with its own
@@ -105,11 +168,11 @@ namespace MediaRipperEncoder.Services
                 {
                     if (!movieMapping.Include) { return null; }
                     return LibraryPathBuilder.BuildMovie(_moviesRoot,
-                        movieMapping.MovieTitle, movieMapping.MovieYear, _outputExtension);
+                        movieMapping.MovieTitle, movieMapping.MovieYear, ext);
                 }
 
                 // Single-movie disc: the top-level metadata is the movie.
-                return LibraryPathBuilder.BuildMovie(_moviesRoot, meta, _outputExtension);
+                return LibraryPathBuilder.BuildMovie(_moviesRoot, meta, ext);
             }
 
             TitleMapping mapping = FindMapping(meta, titleIndex);
@@ -120,17 +183,17 @@ namespace MediaRipperEncoder.Services
 
             if (mapping.Kind == TitleKind.Episode && mapping.Episodes != null && mapping.Episodes.Count > 0)
             {
-                return LibraryPathBuilder.BuildTvEpisode(_tvRoot, meta, mapping, _outputExtension);
+                return LibraryPathBuilder.BuildTvEpisode(_tvRoot, meta, mapping, ext);
             }
 
-            return BuildTvExtraTarget(meta, mapping);
+            return BuildTvExtraTarget(meta, mapping, ext);
         }
 
-        private LibraryTarget BuildTvExtraTarget(MediaMetadata meta, TitleMapping mapping)
+        private LibraryTarget BuildTvExtraTarget(MediaMetadata meta, TitleMapping mapping, string ext)
         {
             string show = FilenameSanitizer.Sanitize(meta.ShowName, "Unknown Show");
             string folder = Path.Combine(_tvRoot ?? "", show, "Extras");
-            string fileName = "Extra - Title " + mapping.TitleIndex.ToString("00") + "." + _outputExtension;
+            string fileName = "Extra - Title " + mapping.TitleIndex.ToString("00") + "." + ext;
             return new LibraryTarget
             {
                 Folder = folder,

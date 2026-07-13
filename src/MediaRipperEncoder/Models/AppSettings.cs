@@ -28,6 +28,16 @@ namespace MediaRipperEncoder.Models
         public string HandBrakeAnimationPresetPath { get; set; }
 
         /// <summary>
+        /// Optional path to a UHD (4K) HandBrake preset .json — used when the disc type is UHD
+        /// Blu-ray. UHD is HEVC 10-bit HDR, which needs a different preset than the x264 standard
+        /// one (an 8-bit x264 encode strips HDR). Blank if the user doesn't rip UHD.
+        /// </summary>
+        public string HandBrakeUhdPresetPath { get; set; }
+
+        /// <summary>Optional UHD animation-tuned preset .json (cartoons/anime on UHD Blu-ray).</summary>
+        public string HandBrakeUhdAnimationPresetPath { get; set; }
+
+        /// <summary>
         /// Output format for ripped music: "flac" (default), "mp3", or "wav". CD ripping and
         /// encoding are built in (no external tool) — see Services\Music.
         /// </summary>
@@ -128,6 +138,8 @@ namespace MediaRipperEncoder.Models
             HandBrakeCliPath = "";
             HandBrakePresetPath = "";
             HandBrakeAnimationPresetPath = "";
+            HandBrakeUhdPresetPath = "";
+            HandBrakeUhdAnimationPresetPath = "";
             MusicFormatId = "flac";
             OmdbApiKey = "";
             TheTvdbApiKey = "";

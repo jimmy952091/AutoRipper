@@ -27,6 +27,12 @@ namespace MediaRipperEncoder.Forms
         private TextBox _networkRipSource;
         private CheckBox _networkRipSearchSubfolders;
 
+        // Advanced tab: HandBrake presets (moved here from the General editor).
+        private TextBox _presetBox;
+        private TextBox _animationPresetBox;
+        private TextBox _uhdPresetBox;
+        private TextBox _uhdAnimationPresetBox;
+
         // Appearance tab.
         private ComboBox _themeCombo;
 
@@ -201,12 +207,43 @@ namespace MediaRipperEncoder.Forms
         {
             var panel = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(14) };
 
+            // ---- HandBrake presets (moved here from the General/first-run editor) ----
+            var presetHeading = new Label
+            {
+                Text = "HandBrake presets (.json exported from HandBrake)",
+                Font = new Font(Font, FontStyle.Bold),
+                AutoSize = true,
+                Location = new Point(14, 14)
+            };
+            var presetBlurb = new Label
+            {
+                Text = "The general preset is used for standard DVD/Blu-ray; the UHD preset is used when a " +
+                       "disc is marked UHD Blu-ray (4K HDR needs HEVC 10-bit — an x264/8-bit preset would " +
+                       "strip the HDR). Animation variants are optional, picked per disc for cartoons/anime. " +
+                       "Leave any you don't use blank.",
+                AutoSize = false,
+                Location = new Point(14, 40),
+                Size = new Size(680, 60)
+            };
+            panel.Controls.Add(presetHeading);
+            panel.Controls.Add(presetBlurb);
+
+            int py = 104;
+            AddPresetRow(panel, "General preset (standard DVD / Blu-ray):", ref py, out _presetBox, settings.HandBrakePresetPath);
+            AddPresetRow(panel, "Animation preset (optional):", ref py, out _animationPresetBox, settings.HandBrakeAnimationPresetPath);
+            AddPresetRow(panel, "UHD preset (4K Blu-ray — HEVC/HDR):", ref py, out _uhdPresetBox, settings.HandBrakeUhdPresetPath);
+            AddPresetRow(panel, "UHD animation preset (optional):", ref py, out _uhdAnimationPresetBox, settings.HandBrakeUhdAnimationPresetPath);
+
+            var presetDivider = new Label { BorderStyle = BorderStyle.Fixed3D, Location = new Point(14, py + 6), Size = new Size(680, 2), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+            panel.Controls.Add(presetDivider);
+            int netTop = py + 20;
+
             var heading = new Label
             {
                 Text = "Network / mapped-drive rip source",
                 Font = new Font(Font, FontStyle.Bold),
                 AutoSize = true,
-                Location = new Point(14, 14)
+                Location = new Point(14, netTop)
             };
 
             var blurb = new Label
@@ -217,7 +254,7 @@ namespace MediaRipperEncoder.Forms
                        "cannot eject it: when a rip finishes it will prompt you to change the disc on the " +
                        "shared drive instead. Leave this off for normal local-disc ripping.",
                 AutoSize = false,
-                Location = new Point(14, 40),
+                Location = new Point(14, netTop + 26),
                 Size = new Size(680, 60)
             };
 
@@ -225,20 +262,20 @@ namespace MediaRipperEncoder.Forms
             {
                 Text = "Enable network / mapped-drive rip source",
                 AutoSize = true,
-                Location = new Point(14, 108),
+                Location = new Point(14, netTop + 94),
                 Checked = settings.NetworkRipEnabled
             };
 
-            var srcLabel = new Label { Text = "Source (drive, folder, or .iso):", AutoSize = true, Location = new Point(14, 142) };
+            var srcLabel = new Label { Text = "Source (drive, folder, or .iso):", AutoSize = true, Location = new Point(14, netTop + 128) };
             _networkRipSource = new TextBox
             {
-                Location = new Point(14, 162),
+                Location = new Point(14, netTop + 148),
                 Size = new Size(560, 23),
                 Text = settings.NetworkRipSource ?? "",
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
 
-            var browse = new Button { Text = "Browse...", Location = new Point(584, 161), Size = new Size(90, 25), Anchor = AnchorStyles.Top | AnchorStyles.Right };
+            var browse = new Button { Text = "Browse...", Location = new Point(584, netTop + 147), Size = new Size(90, 25), Anchor = AnchorStyles.Top | AnchorStyles.Right };
             browse.Click += (s, e) =>
             {
                 using (var dlg = new FolderBrowserDialog { Description = "Pick the mapped drive or mounted disc folder" })
@@ -251,7 +288,7 @@ namespace MediaRipperEncoder.Forms
             {
                 Text = "Auto-find the disc structure (BDMV / VIDEO_TS) in subfolders",
                 AutoSize = true,
-                Location = new Point(14, 196),
+                Location = new Point(14, netTop + 182),
                 Checked = settings.NetworkRipSearchSubfolders
             };
 
@@ -262,7 +299,7 @@ namespace MediaRipperEncoder.Forms
                        "With this on, point at the drive root (e.g. Y:\\) once and AutoRipper finds the " +
                        "right folder automatically at scan time.",
                 AutoSize = false,
-                Location = new Point(32, 218),
+                Location = new Point(32, netTop + 204),
                 Size = new Size(650, 48)
             };
 
@@ -276,17 +313,14 @@ namespace MediaRipperEncoder.Forms
             panel.Controls.Add(subBlurb);
 
             // ---- Distributed encoding: pointer only ----
-            // The connection fields (role/host/port/secret) used to live here too, but two windows
-            // editing the same values invited drift and confusion. Edit > ES Connection is now the
-            // sole owner; this pointer keeps Advanced-tab visitors from thinking the feature vanished.
-            var divider = new Label { BorderStyle = BorderStyle.Fixed3D, Location = new Point(14, 280), Size = new Size(680, 2), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+            var divider = new Label { BorderStyle = BorderStyle.Fixed3D, Location = new Point(14, netTop + 266), Size = new Size(680, 2), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
 
             var netHeading = new Label
             {
                 Text = "Distributed encoding (LAN only)",
                 Font = new Font(Font, FontStyle.Bold),
                 AutoSize = true,
-                Location = new Point(14, 294)
+                Location = new Point(14, netTop + 280)
             };
 
             var netPointer = new Label
@@ -294,7 +328,7 @@ namespace MediaRipperEncoder.Forms
                 Text = "The encoder-server connection (this machine's role, server address, port, and shared " +
                        "secret) is configured from the main window under Edit → ES Connection → Edit connection...",
                 AutoSize = false,
-                Location = new Point(14, 318),
+                Location = new Point(14, netTop + 304),
                 Size = new Size(680, 40)
             };
 
@@ -302,6 +336,32 @@ namespace MediaRipperEncoder.Forms
             panel.Controls.Add(netHeading);
             panel.Controls.Add(netPointer);
             return panel;
+        }
+
+        /// <summary>Adds a "label / textbox / Browse..." preset-path row to the Advanced panel.</summary>
+        private void AddPresetRow(Panel panel, string labelText, ref int y, out TextBox box, string initial)
+        {
+            var label = new Label { Text = labelText, AutoSize = true, Location = new Point(14, y) };
+            box = new TextBox
+            {
+                Location = new Point(14, y + 18),
+                Size = new Size(560, 23),
+                Text = initial ?? "",
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+            TextBox target = box;
+            var browse = new Button { Text = "Browse...", Location = new Point(584, y + 17), Size = new Size(90, 25), Anchor = AnchorStyles.Top | AnchorStyles.Right };
+            browse.Click += (s, e) =>
+            {
+                using (var dlg = new OpenFileDialog { Filter = "HandBrake preset (*.json)|*.json|All files (*.*)|*.*" })
+                {
+                    if (dlg.ShowDialog(this) == DialogResult.OK) { target.Text = dlg.FileName; }
+                }
+            };
+            panel.Controls.Add(label);
+            panel.Controls.Add(box);
+            panel.Controls.Add(browse);
+            y += 50;
         }
 
         private Control BuildButtonBar()
@@ -340,6 +400,10 @@ namespace MediaRipperEncoder.Forms
             _editor.ApplyTo(_settings);
 
             // Advanced tab fields aren't part of the shared editor — apply them here.
+            _settings.HandBrakePresetPath = (_presetBox.Text ?? "").Trim();
+            _settings.HandBrakeAnimationPresetPath = (_animationPresetBox.Text ?? "").Trim();
+            _settings.HandBrakeUhdPresetPath = (_uhdPresetBox.Text ?? "").Trim();
+            _settings.HandBrakeUhdAnimationPresetPath = (_uhdAnimationPresetBox.Text ?? "").Trim();
             _settings.NetworkRipEnabled = _networkRipEnabled.Checked;
             _settings.NetworkRipSource = (_networkRipSource.Text ?? "").Trim();
             _settings.NetworkRipSearchSubfolders = _networkRipSearchSubfolders.Checked;

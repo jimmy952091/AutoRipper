@@ -28,13 +28,8 @@ namespace MediaRipperEncoder.Forms.Controls
         private Label _handBrakeStatus;
         private Button _handBrakeValidate;
 
-        private TextBox _presetBox;
-        private Label _presetStatus;
-        private Button _presetValidate;
-
-        private TextBox _animationPresetBox;
-        private Label _animationPresetStatus;
-        private Button _animationPresetValidate;
+        // HandBrake presets moved to Settings > Advanced (general, animation, and the UHD
+        // variants live together there). See BuildUi's note row.
 
         // Metadata lookup API keys (per-user; never hardcoded/shipped)
         private TextBox _omdbKeyBox;
@@ -81,8 +76,6 @@ namespace MediaRipperEncoder.Forms.Controls
         {
             _makeMkvBox.Text = settings.MakeMkvCliPath ?? "";
             _handBrakeBox.Text = settings.HandBrakeCliPath ?? "";
-            _presetBox.Text = settings.HandBrakePresetPath ?? "";
-            _animationPresetBox.Text = settings.HandBrakeAnimationPresetPath ?? "";
             _omdbKeyBox.Text = settings.OmdbApiKey ?? "";
             _tvdbKeyBox.Text = settings.TheTvdbApiKey ?? "";
             _tvdbPinBox.Text = settings.TheTvdbPin ?? "";
@@ -97,8 +90,6 @@ namespace MediaRipperEncoder.Forms.Controls
         {
             settings.MakeMkvCliPath = _makeMkvBox.Text.Trim();
             settings.HandBrakeCliPath = _handBrakeBox.Text.Trim();
-            settings.HandBrakePresetPath = _presetBox.Text.Trim();
-            settings.HandBrakeAnimationPresetPath = _animationPresetBox.Text.Trim();
             settings.OmdbApiKey = _omdbKeyBox.Text.Trim();
             settings.TheTvdbApiKey = _tvdbKeyBox.Text.Trim();
             settings.TheTvdbPin = _tvdbPinBox.Text.Trim();
@@ -150,16 +141,6 @@ namespace MediaRipperEncoder.Forms.Controls
             var handBrake = ToolValidator.ValidateHandBrake(_handBrakeBox.Text.Trim());
             ShowResult(_handBrakeStatus, handBrake);
 
-            var preset = ToolValidator.ValidatePresetFile(_presetBox.Text.Trim());
-            ShowResult(_presetStatus, preset);
-
-            // The animation preset is optional; validate for feedback only if one was entered.
-            if (!string.IsNullOrWhiteSpace(_animationPresetBox.Text))
-            {
-                var animPreset = ToolValidator.ValidatePresetFile(_animationPresetBox.Text.Trim());
-                ShowResult(_animationPresetStatus, animPreset);
-            }
-
             var movies = FolderValidator.ValidateOutputFolder(_moviesBox.Text.Trim(), "Movies");
             ShowResult(_moviesStatus, movies);
 
@@ -178,8 +159,9 @@ namespace MediaRipperEncoder.Forms.Controls
 
             // Folders that "don't exist yet" report Success=false but are acceptable to
             // finish on, because we create them on demand. Treat only the tools as hard-required
-            // and require the folder paths to be non-blank and well-formed.
-            bool toolsOk = makeMkv.Success && handBrake.Success && preset.Success;
+            // and require the folder paths to be non-blank and well-formed. The HandBrake PRESET
+            // is validated on the Advanced tab now, not here, so it isn't part of this gate.
+            bool toolsOk = makeMkv.Success && handBrake.Success;
             bool foldersPresent =
                 !string.IsNullOrWhiteSpace(_moviesBox.Text) &&
                 !string.IsNullOrWhiteSpace(_tvBox.Text) &&
@@ -206,15 +188,11 @@ namespace MediaRipperEncoder.Forms.Controls
                 "HandBrake CLI|HandBrakeCLI.exe|Executables (*.exe)|*.exe",
                 OnValidateHandBrake);
 
-            AddToolRow("HandBrake preset  (.json exported from HandBrake — general/live-action)", ref y,
-                out _presetBox, out _presetValidate, out _presetStatus,
-                "HandBrake preset (*.json)|*.json|All files (*.*)|*.*",
-                OnValidatePreset);
-
-            AddToolRow("Animation preset  (optional — .json for cartoons/anime; leave blank if unused)", ref y,
-                out _animationPresetBox, out _animationPresetValidate, out _animationPresetStatus,
-                "HandBrake preset (*.json)|*.json|All files (*.*)|*.*",
-                OnValidateAnimationPreset);
+            AddInfoLabel(
+                "HandBrake presets (general, animation, and the UHD/4K variants) are configured on " +
+                "the Advanced tab of Settings. Finish setup here, then set your preset there before " +
+                "your first encode.",
+                ref y);
 
             y += 8;
             y = AddSectionHeader("Metadata lookup — your own free API keys (never shared/built-in)", y);
@@ -516,21 +494,6 @@ namespace MediaRipperEncoder.Forms.Controls
         {
             await RunToolValidationAsync(_handBrakeValidate, _handBrakeStatus, _handBrakeBox.Text.Trim(),
                 path => ToolValidator.ValidateHandBrake(path));
-        }
-
-        private async void OnValidatePreset(object sender, EventArgs e)
-        {
-            // The preset check is a fast file read, but route it through the same path for
-            // consistent status display.
-            await RunToolValidationAsync(_presetValidate, _presetStatus, _presetBox.Text.Trim(),
-                path => ToolValidator.ValidatePresetFile(path));
-        }
-
-        private async void OnValidateAnimationPreset(object sender, EventArgs e)
-        {
-            await RunToolValidationAsync(_animationPresetValidate, _animationPresetStatus,
-                _animationPresetBox.Text.Trim(),
-                path => ToolValidator.ValidatePresetFile(path));
         }
 
         private async Task RunToolValidationAsync(Button button, Label status, string path,
