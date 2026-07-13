@@ -39,6 +39,19 @@ namespace MediaRipperEncoder.Forms
         private TextBox _movieTitle;
         private TextBox _movieYear;
         private Label _movieMatch;
+        private CheckBox _multiMovieCheck;
+        private DataGridView _movieGrid;
+        private Button _movieLookupButton;
+
+        /// <summary>Per-row state for a multi-movie disc (stored in each grid row's Tag).</summary>
+        private class MovieRow
+        {
+            public DiscTitle Title;
+            public string MovieTitle = "";
+            public string MovieYear = "";
+            public string MovieImdbId = "";
+            public bool Assigned { get { return !string.IsNullOrEmpty(MovieImdbId); } }
+        }
 
         // TV controls
         private TextBox _showName;
@@ -179,31 +192,109 @@ namespace MediaRipperEncoder.Forms
         {
             _moviePanel = new Panel { Location = new Point(15, 90), Size = new Size(725, 480) };
 
-            var titleLabel = new Label { Text = "Title:", AutoSize = true, Location = new Point(0, 8) };
-            _movieTitle = new TextBox { Location = new Point(90, 4), Size = new Size(300, 23) };
+            _multiMovieCheck = new CheckBox
+            {
+                Text = "This disc has multiple movies (double feature) — map each one below",
+                AutoSize = true,
+                Location = new Point(0, 6)
+            };
+            _multiMovieCheck.CheckedChanged += (s, e) => UpdateMovieMode();
 
-            var yearLabel = new Label { Text = "Year:", AutoSize = true, Location = new Point(410, 8) };
-            _movieYear = new TextBox { Location = new Point(455, 4), Size = new Size(70, 23) };
+            var titleLabel = new Label { Text = "Title:", AutoSize = true, Location = new Point(0, 40) };
+            _movieTitle = new TextBox { Location = new Point(90, 36), Size = new Size(300, 23) };
 
-            var lookup = new Button { Text = "Look up...", Location = new Point(545, 3), Size = new Size(110, 26) };
-            lookup.Click += OnLookupMovie;
+            var yearLabel = new Label { Text = "Year:", AutoSize = true, Location = new Point(410, 40) };
+            _movieYear = new TextBox { Location = new Point(455, 36), Size = new Size(70, 23) };
+
+            _movieLookupButton = new Button { Text = "Look up...", Location = new Point(545, 35), Size = new Size(160, 26) };
+            _movieLookupButton.Click += OnLookupMovie;
 
             _movieMatch = new Label
             {
                 Text = "No match confirmed yet.",
                 ForeColor = Color.Gray,
                 AutoSize = false,
-                Location = new Point(0, 44),
-                Size = new Size(660, 24)
+                Location = new Point(0, 70),
+                Size = new Size(700, 22)
             };
 
+            // Multi-movie grid (hidden unless the checkbox is on): one row per disc title.
+            _movieGrid = new DataGridView
+            {
+                Location = new Point(0, 100),
+                Size = new Size(705, 300),
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                RowHeadersVisible = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                MultiSelect = false,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None,
+                Visible = false
+            };
+            var includeCol = new DataGridViewCheckBoxColumn { Name = "Include", HeaderText = "Rip", Width = 40 };
+            var titleCol = new DataGridViewTextBoxColumn { Name = "TitleText", HeaderText = "Disc title", Width = 250, ReadOnly = true };
+            var movieCol = new DataGridViewTextBoxColumn { Name = "AssignedMovie", HeaderText = "Assigned movie", Width = 400, ReadOnly = true };
+            _movieGrid.Columns.Add(includeCol);
+            _movieGrid.Columns.Add(titleCol);
+            _movieGrid.Columns.Add(movieCol);
+
+            _moviePanel.Controls.Add(_multiMovieCheck);
             _moviePanel.Controls.Add(titleLabel);
             _moviePanel.Controls.Add(_movieTitle);
             _moviePanel.Controls.Add(yearLabel);
             _moviePanel.Controls.Add(_movieYear);
-            _moviePanel.Controls.Add(lookup);
+            _moviePanel.Controls.Add(_movieLookupButton);
             _moviePanel.Controls.Add(_movieMatch);
+            _moviePanel.Controls.Add(_movieGrid);
             Controls.Add(_moviePanel);
+        }
+
+        /// <summary>Switches the movie panel between single-movie and multi-movie (grid) layouts.</summary>
+        private void UpdateMovieMode()
+        {
+            bool multi = _multiMovieCheck.Checked;
+            _movieGrid.Visible = multi;
+            _movieLookupButton.Text = multi ? "Look up && assign to selected title" : "Look up...";
+            _movieLookupButton.Width = multi ? 260 : 160;
+
+            if (multi && _movieGrid.Rows.Count == 0) { PopulateMovieGrid(); }
+
+            _movieMatch.Text = multi
+                ? "Check the titles that are movies, select a row, type the movie name above, and Look up to assign it."
+                : "No match confirmed yet.";
+            _movieMatch.ForeColor = Color.Gray;
+        }
+
+        /// <summary>Fills the multi-movie grid from the disc's titles; feature-length ones start checked.</summary>
+        private void PopulateMovieGrid()
+        {
+            _movieGrid.Rows.Clear();
+            foreach (DiscTitle t in _titles)
+            {
+                int idx = _movieGrid.Rows.Add();
+                DataGridViewRow row = _movieGrid.Rows[idx];
+                // Titles ~60+ min are almost certainly a feature; pre-check them.
+                bool likelyFeature = ParseMinutes(t.Duration) >= 60;
+                row.Cells["Include"].Value = likelyFeature;
+                row.Cells["TitleText"].Value = "Title " + t.Index +
+                    (string.IsNullOrEmpty(t.Duration) ? "" : "  (" + t.Duration + ")");
+                row.Cells["AssignedMovie"].Value = "(select this row, then Look up)";
+                row.Tag = new MovieRow { Title = t };
+            }
+        }
+
+        private static int ParseMinutes(string duration)
+        {
+            // "H:MM:SS" or "MM:SS" -> whole minutes.
+            if (string.IsNullOrWhiteSpace(duration)) { return 0; }
+            string[] p = duration.Split(':');
+            try
+            {
+                if (p.Length == 3) { return int.Parse(p[0]) * 60 + int.Parse(p[1]); }
+                if (p.Length == 2) { return int.Parse(p[0]); }
+            }
+            catch { }
+            return 0;
         }
 
         // ---------------- TV panel ----------------
@@ -651,6 +742,20 @@ namespace MediaRipperEncoder.Forms
                 return;
             }
 
+            // In multi-movie mode the result is assigned to the selected disc-title row, so a row
+            // must be selected first.
+            DataGridViewRow targetRow = null;
+            if (_multiMovieCheck.Checked)
+            {
+                if (_movieGrid.CurrentRow == null)
+                {
+                    MessageBox.Show(this, "Select the disc title (row below) this movie belongs to first.",
+                        "Pick a title", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                targetRow = _movieGrid.CurrentRow;
+            }
+
             var button = sender as Button;
             if (button != null) { button.Enabled = false; }
             try
@@ -669,13 +774,31 @@ namespace MediaRipperEncoder.Forms
                     if (dialog.ShowDialog(this) == DialogResult.OK)
                     {
                         MetadataCandidate chosen = dialog.SelectedCandidate;
-                        _confirmedImdbId = chosen.ProviderId;
                         _movieTitle.Text = chosen.Title;
                         if (!string.IsNullOrEmpty(chosen.Year)) { _movieYear.Text = chosen.Year; }
-                        SetMatchLabel(_movieMatch,
-                            "Confirmed: " + chosen.Title +
-                            (string.IsNullOrEmpty(chosen.Year) ? "" : " (" + chosen.Year + ")") +
-                            "   [IMDb " + chosen.ProviderId + "]", OkColor);
+
+                        if (targetRow != null)
+                        {
+                            // Multi-movie: assign to the selected disc-title row.
+                            var mr = (MovieRow)targetRow.Tag;
+                            mr.MovieTitle = chosen.Title;
+                            mr.MovieYear = chosen.Year ?? "";
+                            mr.MovieImdbId = chosen.ProviderId;
+                            targetRow.Cells["Include"].Value = true; // assigning implies "rip it"
+                            targetRow.Cells["AssignedMovie"].Value = chosen.Title +
+                                (string.IsNullOrEmpty(chosen.Year) ? "" : " (" + chosen.Year + ")") +
+                                "   [IMDb " + chosen.ProviderId + "]";
+                            SetMatchLabel(_movieMatch, "Assigned " + chosen.Title + " to " +
+                                targetRow.Cells["TitleText"].Value + ". Repeat for the other movie(s).", OkColor);
+                        }
+                        else
+                        {
+                            _confirmedImdbId = chosen.ProviderId;
+                            SetMatchLabel(_movieMatch,
+                                "Confirmed: " + chosen.Title +
+                                (string.IsNullOrEmpty(chosen.Year) ? "" : " (" + chosen.Year + ")") +
+                                "   [IMDb " + chosen.ProviderId + "]", OkColor);
+                        }
                     }
                 }
             }
@@ -900,7 +1023,47 @@ namespace MediaRipperEncoder.Forms
                 PresetName = _presetCombo.SelectedItem as string ?? ""
             };
 
-            if (type == MediaType.Movie)
+            if (type == MediaType.Movie && _multiMovieCheck.Checked)
+            {
+                // Multi-movie disc: build one Movie-kind mapping per checked, assigned title.
+                var mappings = new List<TitleMapping>();
+                bool anyCheckedUnassigned = false;
+                foreach (DataGridViewRow row in _movieGrid.Rows)
+                {
+                    bool include = Convert.ToBoolean(row.Cells["Include"].Value ?? false);
+                    var mr = (MovieRow)row.Tag;
+                    if (!include) { continue; }
+                    if (!mr.Assigned) { anyCheckedUnassigned = true; continue; }
+                    mappings.Add(new TitleMapping
+                    {
+                        TitleIndex = mr.Title.Index,
+                        Duration = mr.Title.Duration,
+                        Include = true,
+                        Kind = TitleKind.Movie,
+                        MovieTitle = mr.MovieTitle,
+                        MovieYear = mr.MovieYear,
+                        MovieImdbId = mr.MovieImdbId
+                    });
+                }
+
+                if (mappings.Count == 0)
+                {
+                    MessageBox.Show(this, "Assign a movie to at least one checked disc title before continuing.",
+                        "Confirm needed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                if (anyCheckedUnassigned)
+                {
+                    DialogResult ans = MessageBox.Show(this,
+                        "Some checked titles have no movie assigned — those will be SKIPPED. Continue with just the assigned ones?",
+                        "Unassigned titles", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                    if (ans != DialogResult.Yes) { return; }
+                }
+
+                meta.TitleMappings = mappings;
+                meta.MatchConfirmed = true;
+            }
+            else if (type == MediaType.Movie)
             {
                 if (string.IsNullOrEmpty(_confirmedImdbId))
                 {

@@ -228,7 +228,21 @@ namespace MediaRipperEncoder.Services
         private static string BuildTitleLabel(MediaMetadata meta, int titleIndex)
         {
             string baseLabel = "Title " + titleIndex.ToString("00");
-            if (meta == null || meta.MediaType != MediaType.TvShow) { return baseLabel; }
+            if (meta == null) { return baseLabel; }
+
+            // Multi-movie disc: label each title with its confirmed film.
+            if (meta.MediaType == MediaType.Movie)
+            {
+                TitleMapping mv = EncodeJobPlanner.FindMapping(meta, titleIndex);
+                if (mv != null && mv.Kind == TitleKind.Movie && !string.IsNullOrEmpty(mv.MovieTitle))
+                {
+                    return baseLabel + "  " + mv.MovieTitle +
+                        (string.IsNullOrEmpty(mv.MovieYear) ? "" : " (" + mv.MovieYear + ")");
+                }
+                return baseLabel;
+            }
+
+            if (meta.MediaType != MediaType.TvShow) { return baseLabel; }
 
             TitleMapping m = EncodeJobPlanner.FindMapping(meta, titleIndex);
             if (m == null || m.Episodes == null || m.Episodes.Count == 0) { return baseLabel; }
@@ -442,6 +456,19 @@ namespace MediaRipperEncoder.Services
         {
             if (meta.MediaType == MediaType.Movie)
             {
+                // Multi-movie disc: list the films (e.g. "Babe (1995) + Beethoven (1992)").
+                if (meta.TitleMappings != null && meta.TitleMappings.Exists(m => m.Kind == TitleKind.Movie))
+                {
+                    var names = new List<string>();
+                    foreach (TitleMapping m in meta.TitleMappings)
+                    {
+                        if (m.Include && m.Kind == TitleKind.Movie)
+                        {
+                            names.Add(m.MovieTitle + (string.IsNullOrEmpty(m.MovieYear) ? "" : " (" + m.MovieYear + ")"));
+                        }
+                    }
+                    if (names.Count > 0) { return string.Join(" + ", names); }
+                }
                 return meta.MovieTitle + (string.IsNullOrEmpty(meta.Year) ? "" : " (" + meta.Year + ")");
             }
             return meta.ShowName + " S" + meta.SeasonNumber.ToString("00") + " (disc " + meta.DiscNumber + ")";
@@ -469,7 +496,18 @@ namespace MediaRipperEncoder.Services
                 return indices;
             }
 
-            // Movie (or anything else): rip only the longest title.
+            // Multi-movie (double-feature) disc: rip each included, confirmed movie title.
+            if (meta.MediaType == MediaType.Movie && meta.TitleMappings != null &&
+                meta.TitleMappings.Exists(m => m.Kind == TitleKind.Movie))
+            {
+                foreach (TitleMapping m in meta.TitleMappings)
+                {
+                    if (m.Include && m.Kind == TitleKind.Movie) { indices.Add(m.TitleIndex); }
+                }
+                return indices;
+            }
+
+            // Single-movie disc (or anything else): rip only the longest title.
             DiscTitle longest = SelectLongestTitle(discTitles);
             if (longest != null) { indices.Add(longest.Index); }
             return indices;

@@ -26,10 +26,19 @@ namespace MediaRipperEncoder.Services
         /// <summary>Builds the Movie destination. Year is optional but strongly recommended.</summary>
         public static LibraryTarget BuildMovie(string moviesRoot, MediaMetadata meta, string ext)
         {
-            string title = FilenameSanitizer.Sanitize(meta.MovieTitle, "Untitled Movie");
-            string folderName = string.IsNullOrWhiteSpace(meta.Year)
+            return BuildMovie(moviesRoot, meta.MovieTitle, meta.Year, ext);
+        }
+
+        /// <summary>
+        /// Builds a Movie destination from an explicit title/year — used for one film on a
+        /// multi-movie (double-feature) disc, where each mapped title is its own movie.
+        /// </summary>
+        public static LibraryTarget BuildMovie(string moviesRoot, string movieTitle, string year, string ext)
+        {
+            string title = FilenameSanitizer.Sanitize(movieTitle, "Untitled Movie");
+            string folderName = string.IsNullOrWhiteSpace(year)
                 ? title
-                : title + " (" + meta.Year + ")";
+                : title + " (" + year + ")";
 
             string folder = Path.Combine(moviesRoot ?? "", folderName);
             string fileName = folderName + "." + NormalizeExt(ext);
@@ -102,8 +111,14 @@ namespace MediaRipperEncoder.Services
         /// <summary>The embedded Title tag for a movie: "Title (Year)" (original punctuation).</summary>
         public static string BuildMovieTitle(MediaMetadata meta)
         {
-            string t = string.IsNullOrWhiteSpace(meta.MovieTitle) ? "Untitled" : meta.MovieTitle.Trim();
-            return string.IsNullOrWhiteSpace(meta.Year) ? t : t + " (" + meta.Year + ")";
+            return BuildMovieTitle(meta.MovieTitle, meta.Year);
+        }
+
+        /// <summary>Embedded Title tag "Title (Year)" from an explicit title/year (multi-movie disc).</summary>
+        public static string BuildMovieTitle(string movieTitle, string year)
+        {
+            string t = string.IsNullOrWhiteSpace(movieTitle) ? "Untitled" : movieTitle.Trim();
+            return string.IsNullOrWhiteSpace(year) ? t : t + " (" + year + ")";
         }
 
         /// <summary>Joins episode names with " &amp; " keeping their original punctuation (for tags).</summary>

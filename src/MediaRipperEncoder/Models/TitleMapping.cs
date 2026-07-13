@@ -29,6 +29,15 @@ namespace MediaRipperEncoder.Models
 
         public int SeasonNumber { get; set; }
 
+        // --- Movie fields (Kind == Movie), used for a MULTI-MOVIE disc (e.g. a Babe + Beethoven
+        // double feature), where each mapped title is a distinct film with its own confirmed
+        // identity and lands in its own Movies/<Title> (<Year>)/ folder. Empty for a single-movie
+        // disc (that path uses the top-level MediaMetadata.MovieTitle/Year/ImdbId instead). ---
+
+        public string MovieTitle { get; set; }
+        public string MovieYear { get; set; }
+        public string MovieImdbId { get; set; }
+
         /// <summary>
         /// The episode(s) this title covers, in order. One entry for a normal episode; two or
         /// more for a segmented title that becomes a multi-episode file. Empty for extras/ignored.
@@ -41,6 +50,15 @@ namespace MediaRipperEncoder.Models
             Include = true;
             Kind = TitleKind.Episode;
             Episodes = new List<EpisodeInfo>();
+            MovieTitle = "";
+            MovieYear = "";
+            MovieImdbId = "";
+        }
+
+        /// <summary>True when this mapping is a confirmed movie (multi-movie disc).</summary>
+        public bool IsConfirmedMovie
+        {
+            get { return Kind == TitleKind.Movie && !string.IsNullOrEmpty(MovieImdbId); }
         }
 
         /// <summary>True when this title covers more than one episode (a multi-episode file).</summary>

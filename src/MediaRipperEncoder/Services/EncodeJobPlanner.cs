@@ -98,6 +98,17 @@ namespace MediaRipperEncoder.Services
         {
             if (meta.MediaType == MediaType.Movie)
             {
+                // Multi-movie (double-feature) disc: each title is a distinct film with its own
+                // confirmed identity. Build from THAT title's movie fields.
+                TitleMapping movieMapping = FindMapping(meta, titleIndex);
+                if (movieMapping != null && movieMapping.Kind == TitleKind.Movie)
+                {
+                    if (!movieMapping.Include) { return null; }
+                    return LibraryPathBuilder.BuildMovie(_moviesRoot,
+                        movieMapping.MovieTitle, movieMapping.MovieYear, _outputExtension);
+                }
+
+                // Single-movie disc: the top-level metadata is the movie.
                 return LibraryPathBuilder.BuildMovie(_moviesRoot, meta, _outputExtension);
             }
 
@@ -136,6 +147,11 @@ namespace MediaRipperEncoder.Services
         {
             if (meta.MediaType == MediaType.Movie)
             {
+                TitleMapping movieMapping = FindMapping(meta, titleIndex);
+                if (movieMapping != null && movieMapping.Kind == TitleKind.Movie)
+                {
+                    return LibraryPathBuilder.BuildMovieTitle(movieMapping.MovieTitle, movieMapping.MovieYear);
+                }
                 return LibraryPathBuilder.BuildMovieTitle(meta);
             }
 
