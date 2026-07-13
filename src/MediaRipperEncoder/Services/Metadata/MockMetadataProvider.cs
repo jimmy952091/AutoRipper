@@ -39,6 +39,13 @@ namespace MediaRipperEncoder.Services.Metadata
             return Task.FromResult(results);
         }
 
+        // The mock has no real runtime data; 0 means "unknown", so the multi-movie auto-matcher
+        // cleanly falls back to manual row selection when running keyless.
+        public Task<int> GetMovieRuntimeMinutesAsync(string imdbId)
+        {
+            return Task.FromResult(0);
+        }
+
         public Task<List<MetadataCandidate>> SearchSeriesAsync(string name)
         {
             var results = new List<MetadataCandidate>

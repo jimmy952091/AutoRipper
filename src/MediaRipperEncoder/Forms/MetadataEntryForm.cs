@@ -42,6 +42,8 @@ namespace MediaRipperEncoder.Forms
         private CheckBox _multiMovieCheck;
         private DataGridView _movieGrid;
         private Button _movieLookupButton;
+        private Button _movieClearButton;
+        private Button _movieSwapButton;
 
         /// <summary>Per-row state for a multi-movie disc (stored in each grid row's Tag).</summary>
         private class MovieRow
@@ -238,6 +240,13 @@ namespace MediaRipperEncoder.Forms
             _movieGrid.Columns.Add(titleCol);
             _movieGrid.Columns.Add(movieCol);
 
+            _movieClearButton = new Button { Text = "Clear selected title", Location = new Point(0, 406), Size = new Size(140, 26), Visible = false };
+            _movieClearButton.Click += OnClearMovieRow;
+            _movieSwapButton = new Button { Text = "Swap the two movies", Location = new Point(150, 406), Size = new Size(150, 26), Visible = false };
+            _movieSwapButton.Click += OnSwapMovies;
+
+            _moviePanel.Controls.Add(_movieClearButton);
+            _moviePanel.Controls.Add(_movieSwapButton);
             _moviePanel.Controls.Add(_multiMovieCheck);
             _moviePanel.Controls.Add(titleLabel);
             _moviePanel.Controls.Add(_movieTitle);
@@ -254,8 +263,10 @@ namespace MediaRipperEncoder.Forms
         {
             bool multi = _multiMovieCheck.Checked;
             _movieGrid.Visible = multi;
-            _movieLookupButton.Text = multi ? "Look up && assign to selected title" : "Look up...";
-            _movieLookupButton.Width = multi ? 260 : 160;
+            _movieClearButton.Visible = multi;
+            _movieSwapButton.Visible = multi;
+            _movieLookupButton.Text = multi ? "Look up movie" : "Look up...";
+            _movieLookupButton.Width = 160;
 
             if (multi && _movieGrid.Rows.Count == 0) { PopulateMovieGrid(); }
 
@@ -295,6 +306,109 @@ namespace MediaRipperEncoder.Forms
             }
             catch { }
             return 0;
+        }
+
+        /// <summary>
+        /// Assigns a confirmed film to the best-fitting disc title: the UNASSIGNED title whose
+        /// duration is closest to the movie's runtime. If the runtime is unknown (0), it uses the
+        /// selected row (or the first unassigned). If this film was already on another title, it's
+        /// MOVED, not duplicated.
+        /// </summary>
+        private void AssignMovieAutoMatched(MetadataCandidate chosen, int runtimeMinutes)
+        {
+            // A film only lives on one title — clear any prior assignment of the same IMDb id.
+            foreach (DataGridViewRow r in _movieGrid.Rows)
+            {
+                var existing = (MovieRow)r.Tag;
+                if (existing.MovieImdbId == chosen.ProviderId) { ClearRow(r); }
+            }
+
+            DataGridViewRow best = null;
+            if (runtimeMinutes > 0)
+            {
+                int bestDelta = int.MaxValue;
+                foreach (DataGridViewRow r in _movieGrid.Rows)
+                {
+                    var mr = (MovieRow)r.Tag;
+                    if (mr.Assigned) { continue; } // don't steal a title already given to another film
+                    int delta = Math.Abs(ParseMinutes(mr.Title.Duration) - runtimeMinutes);
+                    if (delta < bestDelta) { bestDelta = delta; best = r; }
+                }
+            }
+
+            bool autoMatched = best != null;
+            if (best == null)
+            {
+                // No runtime (or every title already assigned): fall back to selection / first free.
+                best = _movieGrid.CurrentRow;
+                if (best == null || ((MovieRow)best.Tag).Assigned)
+                {
+                    foreach (DataGridViewRow r in _movieGrid.Rows)
+                    {
+                        if (!((MovieRow)r.Tag).Assigned) { best = r; break; }
+                    }
+                }
+            }
+            if (best == null) { best = _movieGrid.CurrentRow; } // last resort: whatever's selected
+
+            AssignRow(best, chosen);
+
+            string where = best.Cells["TitleText"].Value.ToString();
+            SetMatchLabel(_movieMatch, autoMatched
+                ? "Auto-matched " + chosen.Title + " (" + runtimeMinutes + " min) to " + where +
+                  " by runtime. If that's the wrong title, use \"Swap the two movies\" or Clear and redo."
+                : "Assigned " + chosen.Title + " to " + where +
+                  " (no runtime available to auto-match — check it's the right title).", OkColor);
+        }
+
+        private void AssignRow(DataGridViewRow row, MetadataCandidate chosen)
+        {
+            var mr = (MovieRow)row.Tag;
+            mr.MovieTitle = chosen.Title;
+            mr.MovieYear = chosen.Year ?? "";
+            mr.MovieImdbId = chosen.ProviderId;
+            row.Cells["Include"].Value = true; // assigning a film implies "rip this title"
+            row.Cells["AssignedMovie"].Value = chosen.Title +
+                (string.IsNullOrEmpty(chosen.Year) ? "" : " (" + chosen.Year + ")") +
+                "   [IMDb " + chosen.ProviderId + "]";
+        }
+
+        private void ClearRow(DataGridViewRow row)
+        {
+            var mr = (MovieRow)row.Tag;
+            mr.MovieTitle = ""; mr.MovieYear = ""; mr.MovieImdbId = "";
+            row.Cells["AssignedMovie"].Value = "(select this row, then Look up)";
+        }
+
+        private void OnClearMovieRow(object sender, EventArgs e)
+        {
+            if (_movieGrid.CurrentRow == null) { return; }
+            ClearRow(_movieGrid.CurrentRow);
+            SetMatchLabel(_movieMatch, "Cleared. Look up a movie to reassign this title.", Color.Gray);
+        }
+
+        /// <summary>Swaps the film assignments of the two assigned titles — the one-click fix for a
+        /// backwards auto-match (Babe and Beethoven landing on each other's title).</summary>
+        private void OnSwapMovies(object sender, EventArgs e)
+        {
+            var assigned = new List<DataGridViewRow>();
+            foreach (DataGridViewRow r in _movieGrid.Rows)
+            {
+                if (((MovieRow)r.Tag).Assigned) { assigned.Add(r); }
+            }
+            if (assigned.Count != 2)
+            {
+                MessageBox.Show(this, "Swap works when exactly two titles have movies assigned.",
+                    "Swap", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var a = (MovieRow)assigned[0].Tag;
+            var b = (MovieRow)assigned[1].Tag;
+            var tmp = new MetadataCandidate { Title = a.MovieTitle, Year = a.MovieYear, ProviderId = a.MovieImdbId };
+            AssignRow(assigned[0], new MetadataCandidate { Title = b.MovieTitle, Year = b.MovieYear, ProviderId = b.MovieImdbId });
+            AssignRow(assigned[1], tmp);
+            SetMatchLabel(_movieMatch, "Swapped the two movies.", OkColor);
         }
 
         // ---------------- TV panel ----------------
@@ -742,19 +856,7 @@ namespace MediaRipperEncoder.Forms
                 return;
             }
 
-            // In multi-movie mode the result is assigned to the selected disc-title row, so a row
-            // must be selected first.
-            DataGridViewRow targetRow = null;
-            if (_multiMovieCheck.Checked)
-            {
-                if (_movieGrid.CurrentRow == null)
-                {
-                    MessageBox.Show(this, "Select the disc title (row below) this movie belongs to first.",
-                        "Pick a title", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    return;
-                }
-                targetRow = _movieGrid.CurrentRow;
-            }
+            bool multi = _multiMovieCheck.Checked;
 
             var button = sender as Button;
             if (button != null) { button.Enabled = false; }
@@ -771,35 +873,26 @@ namespace MediaRipperEncoder.Forms
 
                 using (var dialog = new ConfirmMatchDialog(title, candidates))
                 {
-                    if (dialog.ShowDialog(this) == DialogResult.OK)
-                    {
-                        MetadataCandidate chosen = dialog.SelectedCandidate;
-                        _movieTitle.Text = chosen.Title;
-                        if (!string.IsNullOrEmpty(chosen.Year)) { _movieYear.Text = chosen.Year; }
+                    if (dialog.ShowDialog(this) != DialogResult.OK) { return; }
+                    MetadataCandidate chosen = dialog.SelectedCandidate;
+                    _movieTitle.Text = chosen.Title;
+                    if (!string.IsNullOrEmpty(chosen.Year)) { _movieYear.Text = chosen.Year; }
 
-                        if (targetRow != null)
-                        {
-                            // Multi-movie: assign to the selected disc-title row.
-                            var mr = (MovieRow)targetRow.Tag;
-                            mr.MovieTitle = chosen.Title;
-                            mr.MovieYear = chosen.Year ?? "";
-                            mr.MovieImdbId = chosen.ProviderId;
-                            targetRow.Cells["Include"].Value = true; // assigning implies "rip it"
-                            targetRow.Cells["AssignedMovie"].Value = chosen.Title +
-                                (string.IsNullOrEmpty(chosen.Year) ? "" : " (" + chosen.Year + ")") +
-                                "   [IMDb " + chosen.ProviderId + "]";
-                            SetMatchLabel(_movieMatch, "Assigned " + chosen.Title + " to " +
-                                targetRow.Cells["TitleText"].Value + ". Repeat for the other movie(s).", OkColor);
-                        }
-                        else
-                        {
-                            _confirmedImdbId = chosen.ProviderId;
-                            SetMatchLabel(_movieMatch,
-                                "Confirmed: " + chosen.Title +
-                                (string.IsNullOrEmpty(chosen.Year) ? "" : " (" + chosen.Year + ")") +
-                                "   [IMDb " + chosen.ProviderId + "]", OkColor);
-                        }
+                    if (!multi)
+                    {
+                        _confirmedImdbId = chosen.ProviderId;
+                        SetMatchLabel(_movieMatch,
+                            "Confirmed: " + chosen.Title +
+                            (string.IsNullOrEmpty(chosen.Year) ? "" : " (" + chosen.Year + ")") +
+                            "   [IMDb " + chosen.ProviderId + "]", OkColor);
+                        return;
                     }
+
+                    // Multi-movie: auto-match this film to the disc title whose duration is closest
+                    // to its runtime (among titles not already assigned). Falls back to the selected
+                    // row if the runtime is unknown.
+                    int runtime = await _provider.GetMovieRuntimeMinutesAsync(chosen.ProviderId);
+                    AssignMovieAutoMatched(chosen, runtime);
                 }
             }
             catch (Exception ex)

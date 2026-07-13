@@ -60,6 +60,47 @@ namespace MediaRipperEncoder.Services.Metadata
         }
 
         /// <summary>
+        /// Fetches a movie's runtime in minutes via a by-IMDb-id lookup (the search endpoint
+        /// doesn't include runtime). Returns 0 if unknown or on any failure — the caller treats
+        /// 0 as "can't auto-match, fall back to manual", so this never throws.
+        /// </summary>
+        public async Task<int> GetRuntimeMinutesAsync(string imdbId)
+        {
+            if (string.IsNullOrWhiteSpace(_apiKey) || string.IsNullOrWhiteSpace(imdbId)) { return 0; }
+            try
+            {
+                string url = BaseUrl + "?apikey=" + Uri.EscapeDataString(_apiKey) +
+                             "&i=" + Uri.EscapeDataString(imdbId);
+                string json = await _http.GetStringAsync(url).ConfigureAwait(false);
+                return ParseRuntime(json);
+            }
+            catch (Exception ex)
+            {
+                Logger.Info("OMDb runtime lookup failed for " + imdbId + " (" + ex.Message + ").");
+                return 0;
+            }
+        }
+
+        /// <summary>Parses "Runtime":"89 min" from an OMDb detail response. Pure, testable. 0 if absent/"N/A".</summary>
+        public static int ParseRuntime(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json)) { return 0; }
+            JObject root = JObject.Parse(json);
+            string runtime = (string)root["Runtime"];
+            if (string.IsNullOrWhiteSpace(runtime)) { return 0; }
+
+            // Take the leading integer of e.g. "89 min"; "N/A" yields 0.
+            var digits = new System.Text.StringBuilder();
+            foreach (char c in runtime)
+            {
+                if (char.IsDigit(c)) { digits.Append(c); }
+                else if (digits.Length > 0) { break; }
+            }
+            int minutes;
+            return int.TryParse(digits.ToString(), out minutes) ? minutes : 0;
+        }
+
+        /// <summary>
         /// Parses an OMDb search response. Pure function (no network) so it's directly testable.
         /// OMDb signals "no results" with {"Response":"False","Error":"Movie not found!"} —
         /// that's returned as an empty list, not an exception.

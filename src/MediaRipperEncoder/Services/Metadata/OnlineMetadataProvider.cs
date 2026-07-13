@@ -24,6 +24,11 @@ namespace MediaRipperEncoder.Services.Metadata
             return _omdb.SearchMoviesAsync(title, year);
         }
 
+        public Task<int> GetMovieRuntimeMinutesAsync(string imdbId)
+        {
+            return _omdb.GetRuntimeMinutesAsync(imdbId);
+        }
+
         public Task<List<MetadataCandidate>> SearchSeriesAsync(string name)
         {
             return _tvdb.SearchSeriesAsync(name);

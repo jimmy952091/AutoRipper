@@ -15,6 +15,12 @@ namespace MediaRipperEncoder.Services.Metadata
         /// <summary>Search movies (OMDb). Year may be "" to search without a year filter.</summary>
         Task<List<MetadataCandidate>> SearchMoviesAsync(string title, string year);
 
+        /// <summary>
+        /// A movie's runtime in whole minutes (OMDb by-id lookup), or 0 if unknown. Used to
+        /// auto-match films to disc titles on a multi-movie disc. Never throws.
+        /// </summary>
+        Task<int> GetMovieRuntimeMinutesAsync(string imdbId);
+
         /// <summary>Search TV series (TheTVDB) by name.</summary>
         Task<List<MetadataCandidate>> SearchSeriesAsync(string name);
 

@@ -31,6 +31,13 @@ namespace MediaRipperEncoder.Models
         /// <summary>Poster/artwork URL if the provider supplied one (optional, may be "").</summary>
         public string PosterUrl { get; set; }
 
+        /// <summary>
+        /// Movie runtime in whole minutes, or 0 if unknown. Used to auto-match each film to the
+        /// right disc title on a multi-movie disc. OMDb's search results don't carry it, so it's
+        /// filled by a follow-up by-id lookup only when needed.
+        /// </summary>
+        public int RuntimeMinutes { get; set; }
+
         public MetadataCandidate()
         {
             ProviderId = "";
