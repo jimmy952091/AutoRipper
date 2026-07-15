@@ -28,6 +28,14 @@ namespace MediaRipperEncoder.Services.Music
 
         private readonly HttpClient _http;
 
+        /// <summary>
+        /// The exception behind the most recent discid/TOC lookup that returned an empty list
+        /// because of a NETWORK failure — null when the disc genuinely isn't in the database.
+        /// Lets the UI distinguish "unknown disc, try typing it" (normal) from "couldn't reach
+        /// MusicBrainz at all" (e.g. the Windows 7 TLS limitation), which need different advice.
+        /// </summary>
+        public Exception LastLookupFailure { get; private set; }
+
         public MusicBrainzClient(HttpClient http = null)
         {
             _http = http ?? SharedHttp.Client;
@@ -43,6 +51,7 @@ namespace MediaRipperEncoder.Services.Music
             string url = BaseUrl + "/discid/" + Uri.EscapeDataString(discId ?? "") +
                          "?fmt=json&inc=artist-credits+recordings";
             string json;
+            LastLookupFailure = null;
             try
             {
                 json = await GetAsync(url).ConfigureAwait(false);
@@ -54,6 +63,7 @@ namespace MediaRipperEncoder.Services.Music
                 // logged: the outer message alone ("An error occurred while sending the request")
                 // told us nothing when a Win7 machine couldn't reach MusicBrainz.
                 Logger.Info("MusicBrainz discid lookup returned nothing: " + DescribeChain(ex));
+                if (!ex.Message.Contains("(HTTP")) { LastLookupFailure = ex; }
                 return new List<MusicRelease>();
             }
             return ParseDiscIdResponse(json, discId);
@@ -75,6 +85,7 @@ namespace MediaRipperEncoder.Services.Music
             string url = BaseUrl + "/discid/-?toc=" + sb +
                          "&fmt=json&inc=artist-credits+recordings";
             string json;
+            LastLookupFailure = null;
             try
             {
                 json = await GetAsync(url).ConfigureAwait(false);
@@ -82,6 +93,7 @@ namespace MediaRipperEncoder.Services.Music
             catch (Exception ex)
             {
                 Logger.Info("MusicBrainz TOC lookup returned nothing: " + DescribeChain(ex));
+                if (!ex.Message.Contains("(HTTP")) { LastLookupFailure = ex; }
                 return new List<MusicRelease>();
             }
             return ParseDiscIdResponse(json, null);
@@ -145,6 +157,40 @@ namespace MediaRipperEncoder.Services.Music
                 current = current.InnerException;
             }
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// Turns a lookup failure into a message the user can act on. The big case: Windows 7's
+        /// SChannel lacks the modern cipher suites musicbrainz.org requires (they were added in
+        /// Windows 8), so a FULLY UPDATED Win7 box still fails the TLS handshake with "Could not
+        /// create SSL/TLS secure channel". Confirmed on real fully-patched Win7 hardware
+        /// (2026-07-15). .NET delegates TLS to Windows, so no app-side fix exists — say that
+        /// plainly instead of parroting the raw error and letting the user chase a ghost.
+        /// </summary>
+        public static string FriendlyLookupError(Exception ex)
+        {
+            string chain = DescribeChain(ex);
+            bool tlsFailure = chain.IndexOf("secure channel", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            // 6.1 = Windows 7 / Server 2008 R2. A net48 app without a Win8+ manifest can see 6.2
+            // reported on anything newer, but it only ever sees 6.1 when it really is Windows 7.
+            Version os = Environment.OSVersion.Version;
+            bool isWindows7 = os.Major == 6 && os.Minor <= 1;
+
+            if (tlsFailure && isWindows7)
+            {
+                return "Windows 7 can't make a secure connection to MusicBrainz. Its built-in " +
+                       "encryption predates what musicbrainz.org requires, even with every " +
+                       "Windows update installed — this is a limit of Windows 7 itself, not a " +
+                       "problem with the disc or your network. Rip music CDs on a machine " +
+                       "running Windows 8 or newer; video ripping on this machine is unaffected.";
+            }
+            if (tlsFailure)
+            {
+                return "Couldn't make a secure connection to MusicBrainz (TLS handshake failed). " +
+                       "Details: " + chain;
+            }
+            return chain;
         }
 
         private async Task<string> GetAsync(string url)

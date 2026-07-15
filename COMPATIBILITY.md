@@ -14,9 +14,16 @@ Real-world verified combinations. "Verified" means actually run on hardware, not
 
 ## External tools on Windows 7 / 8
 
-- **HandBrake / HandBrakeCLI: use version 1.4.x** — it's the last release that supports
-  Windows 7/8. The 1.4 GUI additionally requires the **.NET 5.0 desktop runtime** (a separate
-  Microsoft download; only needed for the GUI — AutoRipper itself only drives the CLI).
+- **HandBrake / HandBrakeCLI: use 1.3.3 or 1.4.x.** 1.4.x is the last release that supports
+  Windows 7/8, but its GUI requires the **.NET 5.0 desktop runtime** (a separate Microsoft
+  download). **1.3.3 works out of the box with no extra runtime** (it's what Ninite installs
+  on Windows 7) and is fine for AutoRipper — both verified.
+- **Presets on old HandBrake: modern preset exports do NOT import.** Preset files exported
+  from a current HandBrake use a newer format (v72 as of mid-2026) than 1.3.3/1.4 understand
+  (1.3.3 = v42). Re-create the preset in the old version's own GUI and export from there, or
+  use a preset file written in the old format. Do NOT build UHD/4K-HDR presets on 1.3.3:
+  HDR10 passthrough and the 10-bit pipeline arrived in HandBrake 1.4 — a 1.3.3 UHD encode
+  strips the HDR (washed-out colors). Keep UHD encoding on a modern-HandBrake machine.
 - **"Encode fails instantly" on 1.4 — root cause found (log-verified):** AutoRipper versions
   before 2026-07-09 passed a `--no-metadata` flag that HandBrakeCLI 1.4 doesn't know;
   1.4 treats unknown options as fatal (`unknown option (--no-metadata)` in the log) and exits
@@ -28,15 +35,18 @@ Real-world verified combinations. "Verified" means actually run on hardware, not
   the safe choice. (Key settings if rebuilding by hand: encoder preset *slow*, profile High,
   level Auto, RF 18, framerate Same-as-source/VFR, no subtitle tracks.)
 - **MakeMKV: the current version installs and runs on Windows 7 with no issues (verified).**
-- **MusicBrainz (audio-CD lookup) on Windows 7: fixed in-app.** Old Windows installs that don't
-  receive automatic root-certificate updates lack roots issued after ~2009 — and MusicBrainz's
-  chain terminates in **DigiCert Global Root G2 (issued 2013, newer than Windows 7 itself)**,
-  so the connection failed while other sites with older chains worked. AutoRipper now embeds
-  the genuine DigiCert Global Root G2 and ISRG Root X1 (Let's Encrypt) roots as pinned fallback
-  trust anchors: chains rejected *only* for an unknown root are re-verified against these exact
-  roots (all other TLS errors still fail — validation is not weakened). No user action needed;
-  the log notes when the fallback engages. If a lookup still fails, the log
-  (`%AppData%\AutoRipper\logs`) prints the full error chain naming the cause.
+- **MusicBrainz (audio-CD lookup) on Windows 7: NOT POSSIBLE — confirmed Windows limitation
+  (2026-07-15, fully patched install).** Two separate causes were found. The first — missing
+  modern root certificates on old installs — is fixed in-app (AutoRipper embeds DigiCert
+  Global Root G2 and ISRG Root X1 as pinned fallback trust anchors; validation is not
+  weakened). The second is the hard blocker: **Windows 7's TLS layer (SChannel) lacks the
+  modern cipher suites musicbrainz.org's servers require** (the needed ECDHE+AES-GCM suites
+  were added in Windows 8), so the handshake fails with "Could not create SSL/TLS secure
+  channel" even with every Windows update installed. .NET applications delegate TLS to
+  Windows, so **no application-level fix exists**. AutoRipper detects this case and explains
+  it in plain language in the UI. Workaround: rip music CDs on a Windows 8-or-newer machine.
+  Video ripping on Windows 7 — including Client Node mode — is unaffected (the node link is
+  plain LAN TCP, not TLS).
 
 ## Distributed (two-machine) mode
 

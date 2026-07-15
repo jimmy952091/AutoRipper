@@ -67,6 +67,9 @@ namespace MediaRipperEncoder.Forms
 
         // Music controls
         private Label _musicStatus;
+
+        /// <summary>One explanation dialog per window for the permanent Win7-TLS lookup failure.</summary>
+        private bool _explainedLookupFailure;
         private ComboBox _musicReleaseCombo;
         private TextBox _musicArtistBox;
         private TextBox _musicAlbumBox;
@@ -800,7 +803,16 @@ namespace MediaRipperEncoder.Forms
             }
             catch (Exception ex)
             {
-                SetMatchLabel(_musicStatus, "Search failed: " + ex.Message, FailColor);
+                string friendly = MusicBrainzClient.FriendlyLookupError(ex);
+                SetMatchLabel(_musicStatus, "Search failed: " + friendly, FailColor);
+                // The Windows 7 TLS case is permanent, not retryable — explain it once in a
+                // dialog the user can actually read instead of a truncated status line.
+                if (!_explainedLookupFailure && friendly.StartsWith("Windows 7"))
+                {
+                    _explainedLookupFailure = true;
+                    MessageBox.Show(this, friendly, "MusicBrainz unavailable on Windows 7",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
             }
             finally
             {

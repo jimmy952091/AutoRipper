@@ -589,11 +589,11 @@ namespace MediaRipperEncoder.Forms
             SetStatus("Audio CD detected (" + toc.TrackCount + " tracks) — identifying on MusicBrainz...", false);
 
             List<MusicRelease> candidates;
+            var client = new Services.Music.MusicBrainzClient();
             try
             {
                 candidates = await System.Threading.Tasks.Task.Run(() =>
                 {
-                    var client = new Services.Music.MusicBrainzClient();
                     string discId = Services.Music.MusicBrainzDiscId.Compute(toc);
                     var found = client.LookupByDiscIdAsync(discId).GetAwaiter().GetResult();
                     if (found.Count == 0)
@@ -610,9 +610,21 @@ namespace MediaRipperEncoder.Forms
                 candidates = new List<MusicRelease>(); // form offers the typed search
             }
 
-            SetStatus(candidates.Count > 0
-                ? "Found " + candidates.Count + " matching release(s). Confirm the edition and tracks..."
-                : "Disc not recognized automatically — search by artist/album in the next screen.", false);
+            if (candidates.Count > 0)
+            {
+                SetStatus("Found " + candidates.Count + " matching release(s). Confirm the edition and tracks...", false);
+            }
+            else if (client.LastLookupFailure != null)
+            {
+                // "Unknown disc" and "couldn't reach MusicBrainz at all" need different advice —
+                // don't tell a Windows 7 user to type the album name when no lookup can succeed.
+                SetStatus("Couldn't reach MusicBrainz — " +
+                    Services.Music.MusicBrainzClient.FriendlyLookupError(client.LastLookupFailure), true);
+            }
+            else
+            {
+                SetStatus("Disc not recognized automatically — search by artist/album in the next screen.", false);
+            }
 
             using (var form = new MetadataEntryForm(CreateProvider(), _settings,
                 new List<DiscTitle>(), DiscType.Cd, toc, candidates))
