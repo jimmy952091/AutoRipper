@@ -66,7 +66,7 @@ namespace MediaRipperEncoder.Forms
                 Text = settings.NodeServerHost ?? ""
             };
 
-            var portLabel = new Label { Text = "Port (same on both nodes):", AutoSize = true, Location = new Point(16, 118) };
+            var portLabel = new Label { Text = "Port (same on every node):", AutoSize = true, Location = new Point(16, 118) };
             _port = new NumericUpDown
             {
                 Location = new Point(180, 115),
@@ -108,8 +108,9 @@ namespace MediaRipperEncoder.Forms
 
             var note = new Label
             {
-                Text = "Both machines must use the same port and the same secret. Connection changes take " +
-                       "effect the next time AutoRipper starts on this machine.\r\n\r\n" +
+                Text = "Every machine in the session — the server and each ripper — must use the same port " +
+                       "and the same secret. Connection changes take effect the next time AutoRipper starts " +
+                       "on this machine.\r\n\r\n" +
                        "LAN only — do not forward this port through your router; use a VPN for remote access.",
                 AutoSize = false,
                 Location = new Point(16, 264),
@@ -155,7 +156,7 @@ namespace MediaRipperEncoder.Forms
             }
             if (role != NodeRole.Standalone && secret.Length == 0)
             {
-                MessageBox.Show(this, "Server and Client nodes need a shared secret (the same one on both machines).",
+                MessageBox.Show(this, "Server and Client nodes need a shared secret (the same one on every machine).",
                     "Missing shared secret", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }

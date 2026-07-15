@@ -104,7 +104,7 @@ namespace MediaRipperEncoder.Services.Net
             {
                 throw new InvalidOperationException(
                     "Refusing to start the encoder server without a shared secret. Set one on the " +
-                    "Advanced settings tab (the same value on both machines).");
+                    "connection dialog (the same value on every machine).");
             }
 
             _running = true;

@@ -157,8 +157,8 @@ namespace MediaRipperEncoder.Forms
 
             if (string.IsNullOrWhiteSpace(_settings.NodeSharedSecret))
             {
-                _encodeGroup.Text = "Encode queue — SERVER NOT STARTED (set a shared secret in Settings first)";
-                SetStatus("Encoder Server can't start without a shared secret. Set one in Tools > Settings > Advanced.", true);
+                _encodeGroup.Text = "Encode queue — SERVER NOT STARTED (set a shared secret first)";
+                SetStatus("Encoder Server can't start without a shared secret. Set one in Edit > ES Connection > Edit connection...", true);
                 return;
             }
 

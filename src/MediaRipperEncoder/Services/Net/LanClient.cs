@@ -83,8 +83,8 @@ namespace MediaRipperEncoder.Services.Net
                 NetMessage ack = _conn.Read();
                 if (ack != null && ack.Type == MsgType.AuthFail)
                 {
-                    LastFailure = "The server rejected our shared secret. Check both machines use the same value.";
-                    Logger.Error("LanClient: server rejected our shared secret. Check both machines use the same value.");
+                    LastFailure = "The server rejected our shared secret. Check every machine uses the same value.";
+                    Logger.Error("LanClient: server rejected our shared secret. Check every machine uses the same value.");
                     Dispose();
                     return false;
                 }
