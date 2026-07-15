@@ -46,6 +46,10 @@ namespace MediaRipperEncoder.Services
         /// <summary>Remote encoder connection state changed (RipperClient role). Background thread.</summary>
         public event Action<bool> RemoteConnectionChanged;
 
+        /// <summary>A human-readable remote-connection notice (e.g. "server is full, waiting for a
+        /// slot") worth showing in the status bar. Background thread.</summary>
+        public event Action<string> RemoteNotice;
+
         /// <summary>Rip job status/progress changed (fires on a background thread).</summary>
         public event Action<RipJob> RipJobUpdated;
 
@@ -97,6 +101,7 @@ namespace MediaRipperEncoder.Services
                 _remote = new Services.Net.RemoteEncodeClient(
                     settings.NodeServerHost, settings.NodePort, settings.NodeSharedSecret, Environment.MachineName);
                 _remote.ConnectionChanged += up => { var h = RemoteConnectionChanged; if (h != null) h(up); };
+                _remote.Notice += text => { var h = RemoteNotice; if (h != null) h(text); };
                 _remote.JobStatusChanged += OnRemoteJobStatus;
                 _remote.UploadProgress += OnRemoteUploadProgress;
                 _remote.Start();

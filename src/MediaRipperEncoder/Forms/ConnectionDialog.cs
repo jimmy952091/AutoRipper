@@ -21,6 +21,7 @@ namespace MediaRipperEncoder.Forms
         private readonly TextBox _host;
         private readonly NumericUpDown _port;
         private readonly TextBox _secret;
+        private readonly NumericUpDown _maxClients;
 
         public ConnectionDialog(AppSettings settings)
         {
@@ -31,7 +32,7 @@ namespace MediaRipperEncoder.Forms
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
-            ClientSize = new Size(520, 330);
+            ClientSize = new Size(520, 400);
 
             var heading = new Label
             {
@@ -86,18 +87,37 @@ namespace MediaRipperEncoder.Forms
             var showSecret = new CheckBox { Text = "Show", AutoSize = true, Location = new Point(430, 151) };
             showSecret.CheckedChanged += (s, e) => _secret.UseSystemPasswordChar = !showSecret.Checked;
 
+            var maxLabel = new Label { Text = "Max ripper clients (Server role):", AutoSize = true, Location = new Point(16, 186) };
+            _maxClients = new NumericUpDown
+            {
+                Location = new Point(220, 183),
+                Size = new Size(70, 23),
+                Minimum = 1,
+                Maximum = 10,
+                Value = settings.NodeMaxClients >= 1 && settings.NodeMaxClients <= 10 ? settings.NodeMaxClients : 3
+            };
+            var maxBlurb = new Label
+            {
+                Text = "How many ripping PCs may be connected to this server at once. Rips still transfer " +
+                       "one at a time (extra rippers wait their turn to send), so more clients means faster " +
+                       "disc-swapping across a big collection — not a faster server.",
+                AutoSize = false,
+                Location = new Point(16, 212),
+                Size = new Size(486, 48)
+            };
+
             var note = new Label
             {
                 Text = "Both machines must use the same port and the same secret. Connection changes take " +
                        "effect the next time AutoRipper starts on this machine.\r\n\r\n" +
                        "LAN only — do not forward this port through your router; use a VPN for remote access.",
                 AutoSize = false,
-                Location = new Point(16, 190),
+                Location = new Point(16, 264),
                 Size = new Size(486, 76)
             };
 
-            var save = new Button { Text = "Save", Size = new Size(110, 30), Location = new Point(280, 284) };
-            var cancel = new Button { Text = "Cancel", Size = new Size(100, 30), Location = new Point(400, 284), DialogResult = DialogResult.Cancel };
+            var save = new Button { Text = "Save", Size = new Size(110, 30), Location = new Point(280, 354) };
+            var cancel = new Button { Text = "Cancel", Size = new Size(100, 30), Location = new Point(400, 354), DialogResult = DialogResult.Cancel };
             save.Click += OnSave;
             AcceptButton = save;
             CancelButton = cancel;
@@ -112,6 +132,9 @@ namespace MediaRipperEncoder.Forms
             Controls.Add(secretLabel);
             Controls.Add(_secret);
             Controls.Add(showSecret);
+            Controls.Add(maxLabel);
+            Controls.Add(_maxClients);
+            Controls.Add(maxBlurb);
             Controls.Add(note);
             Controls.Add(save);
             Controls.Add(cancel);
@@ -140,12 +163,14 @@ namespace MediaRipperEncoder.Forms
             bool changed = _settings.NodeRole != role ||
                            _settings.NodeServerHost != host ||
                            _settings.NodePort != (int)_port.Value ||
-                           _settings.NodeSharedSecret != secret;
+                           _settings.NodeSharedSecret != secret ||
+                           _settings.NodeMaxClients != (int)_maxClients.Value;
 
             _settings.NodeRole = role;
             _settings.NodeServerHost = host;
             _settings.NodePort = (int)_port.Value;
             _settings.NodeSharedSecret = secret;
+            _settings.NodeMaxClients = (int)_maxClients.Value;
 
             try
             {

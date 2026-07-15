@@ -10,10 +10,19 @@ namespace MediaRipperEncoder.Services.Net
     /// encode pipeline. Flow per job:
     ///
     ///   JOB_SUBMIT (metadata package)  -> validate, remember as pending, reply JOB_ACCEPTED
+    ///   SEND_REQUEST                   -> transfer slot free? SEND_GRANT : SEND_WAIT (position in line)
     ///   FILE_BEGIN + raw bytes         -> receive into a CONTAINED staging path, verify SHA-256
     ///   plan via the SHARED EncodeJobPlanner (server's own roots/presets, same naming as local)
-    ///   enqueue on the real EncodeQueue -> PROGRESS pushed to the client as it encodes
-    ///   finished -> EncodeFinisher (tag + overwrite-safe placement) -> JOB_DONE to the client
+    ///   enqueue on the real EncodeQueue -> PROGRESS pushed to the owning client as it encodes
+    ///   finished -> EncodeFinisher (tag + overwrite-safe placement) -> JOB_DONE to the owning client
+    ///
+    /// MULTI-CLIENT: several ripper clients can hold sessions at once (up to the configured limit),
+    /// each with its own pending-job queue, but a <see cref="TransferGate"/> serializes the actual
+    /// file transfers — exactly one ripper streams at a time and the rest wait FIFO, so the server's
+    /// network/disk sees one full-speed transfer instead of several crawling ones. Encode jobs are
+    /// queued in the order their files finish arriving (the same strict-FIFO rule as local encodes).
+    /// Job ownership is tracked by CLIENT NAME, so a ripper that reboots and reconnects picks its
+    /// progress updates back up.
     ///
     /// Security posture: the client's metadata package decides only NAMES within the server's own
     /// library roots (via the planner + sanitizer); client-supplied file names are flattened to a
@@ -29,18 +38,33 @@ namespace MediaRipperEncoder.Services.Net
         private readonly EncodeQueue _encodeQueue;
         private readonly EncodeJobPlanner _planner;
         private readonly string _stagingRoot;
+        private readonly TransferGate _gate = new TransferGate();
 
-        // Jobs whose JOB_SUBMIT arrived but whose file hasn't. The protocol is serial (one client,
-        // one file at a time), so a simple FIFO matches files to submissions.
-        private readonly Queue<RemoteEncodeRequest> _awaitingFile = new Queue<RemoteEncodeRequest>();
+        // Per-connection FIFO of jobs whose JOB_SUBMIT arrived but whose file hasn't. Each client's
+        // own protocol is serial (submit -> send -> submit -> send), so matching its next FILE_BEGIN
+        // to the head of ITS queue is exact — and one client's jobs can never pair with another's file.
+        private readonly Dictionary<PeerConnection, Queue<RemoteEncodeRequest>> _awaitingByConn =
+            new Dictionary<PeerConnection, Queue<RemoteEncodeRequest>>();
         private readonly object _stateLock = new object();
 
-        // EncodeJob.Id -> the client's job id, so PROGRESS/JOB_DONE can reference the id the
-        // ripper side knows.
-        private readonly Dictionary<Guid, string> _clientJobIds = new Dictionary<Guid, string>();
+        private class JobOwner
+        {
+            public string ClientJobId;
+            public string ClientName;
+        }
+
+        // EncodeJob.Id -> which client's job it is (by NAME, so reconnects re-attach).
+        private readonly Dictionary<Guid, JobOwner> _jobOwners = new Dictionary<Guid, JobOwner>();
+
+        // Connection -> client name, for routing and for cleanup on disconnect.
+        private readonly Dictionary<PeerConnection, string> _connNames =
+            new Dictionary<PeerConnection, string>();
 
         /// <summary>Mirror of job updates for the server node's own UI (name, percent, operation).</summary>
         public event Action<EncodeJob> JobUpdated;
+
+        /// <summary>Connected-ripper roster changed: (count, max, names) — for the server node's UI.</summary>
+        public event Action<int, int, string[]> ClientsChanged;
 
         public EncodeServerHost(AppSettings settings)
         {
@@ -54,10 +78,11 @@ namespace MediaRipperEncoder.Services.Net
             _stagingRoot = Path.Combine(string.IsNullOrEmpty(settings.TempFolder)
                 ? Path.GetTempPath() : settings.TempFolder, "remote_inbox");
 
-            _server = new LanServer(Environment.MachineName, null, settings.NodeSharedSecret);
+            _server = new LanServer(Environment.MachineName, null, settings.NodeSharedSecret,
+                Math.Max(1, settings.NodeMaxClients));
             _server.MessageReceived += OnMessage;
-            _server.ClientDisconnected += name =>
-                Logger.Info("EncodeServerHost: ripper '" + name + "' disconnected; queued/running encodes continue.");
+            _server.ClientConnected += OnClientConnected;
+            _server.ClientDisconnected += OnClientDisconnected;
 
             _encodeQueue.JobUpdated += OnQueueJobUpdated;
             _encodeQueue.JobEncodedSuccessfully += OnEncodeDone;
@@ -67,7 +92,53 @@ namespace MediaRipperEncoder.Services.Net
         {
             Directory.CreateDirectory(_stagingRoot);
             _server.Start(_settings.NodePort);
-            Logger.Info("EncodeServerHost: ready to receive encode jobs (staging: " + _stagingRoot + ").");
+            Logger.Info("EncodeServerHost: ready to receive encode jobs from up to " +
+                        _server.MaxClients + " ripper(s) (staging: " + _stagingRoot + ").");
+        }
+
+        // ---------------- client lifecycle ----------------
+
+        private void OnClientConnected(string name, PeerConnection conn)
+        {
+            lock (_stateLock)
+            {
+                _awaitingByConn[conn] = new Queue<RemoteEncodeRequest>();
+                _connNames[conn] = name;
+            }
+            RaiseClientsChanged();
+        }
+
+        private void OnClientDisconnected(string name, PeerConnection conn)
+        {
+            int dropped;
+            lock (_stateLock)
+            {
+                Queue<RemoteEncodeRequest> pending;
+                dropped = _awaitingByConn.TryGetValue(conn, out pending) ? pending.Count : 0;
+                _awaitingByConn.Remove(conn);
+                _connNames.Remove(conn);
+            }
+            if (dropped > 0)
+            {
+                // Its files never arrived; the client's outbox still holds those jobs and will
+                // resubmit them whole after it reconnects, so nothing is lost — just noted.
+                Logger.Info("EncodeServerHost: '" + name + "' disconnected with " + dropped +
+                            " submitted job(s) awaiting files; it will resubmit on reconnect.");
+            }
+            Logger.Info("EncodeServerHost: ripper '" + name + "' disconnected; queued/running encodes continue.");
+
+            // If it held the transfer slot or a place in line, hand the slot on / close the gap.
+            DeliverGateNotices(_gate.RemoveOwner(conn));
+            RaiseClientsChanged();
+        }
+
+        private void RaiseClientsChanged()
+        {
+            var handler = ClientsChanged;
+            if (handler != null)
+            {
+                handler(_server.ConnectedCount, _server.MaxClients, _server.ConnectedNames);
+            }
         }
 
         // ---------------- incoming messages ----------------
@@ -77,6 +148,7 @@ namespace MediaRipperEncoder.Services.Net
             try
             {
                 if (msg.Type == MsgType.JobSubmit) { HandleJobSubmit(msg, conn); }
+                else if (msg.Type == MsgType.SendRequest) { HandleSendRequest(msg, conn); }
                 else if (msg.Type == MsgType.FileBegin) { HandleFileBegin(msg, conn); }
                 else { Logger.Info("EncodeServerHost: ignoring unknown message type '" + msg.Type + "'."); }
             }
@@ -103,10 +175,36 @@ namespace MediaRipperEncoder.Services.Net
                 return;
             }
 
-            lock (_stateLock) { _awaitingFile.Enqueue(request); }
+            lock (_stateLock)
+            {
+                Queue<RemoteEncodeRequest> pending;
+                if (!_awaitingByConn.TryGetValue(conn, out pending))
+                {
+                    // Shouldn't happen (connected event registers the queue), but never lose a job to it.
+                    pending = new Queue<RemoteEncodeRequest>();
+                    _awaitingByConn[conn] = pending;
+                }
+                pending.Enqueue(request);
+            }
             conn.Write(new NetMessage(MsgType.JobAccepted).With("jobId", request.ClientJobId ?? ""));
             Logger.Info("EncodeServerHost: accepted job " + request.ClientJobId +
-                        " ('" + request.SourceFileName + "', awaiting file).");
+                        " ('" + request.SourceFileName + "' from '" + NameOf(conn) + "', awaiting file).");
+        }
+
+        /// <summary>
+        /// A ripper wants to stream its next file. Grant the transfer slot if free, otherwise tell
+        /// it its place in line — its UI shows "waiting to send" instead of a stalled progress bar.
+        /// </summary>
+        private void HandleSendRequest(NetMessage msg, PeerConnection conn)
+        {
+            string jobId = msg.GetString("jobId");
+            TransferGate.Notice notice = _gate.Request(conn, jobId);
+            DeliverGateNotices(new List<TransferGate.Notice> { notice });
+            if (!notice.Granted)
+            {
+                Logger.Info("EncodeServerHost: '" + NameOf(conn) + "' queued to send (position " +
+                            notice.Position + ") — another ripper is transferring.");
+            }
         }
 
         private void HandleFileBegin(NetMessage msg, PeerConnection conn)
@@ -114,66 +212,125 @@ namespace MediaRipperEncoder.Services.Net
             RemoteEncodeRequest request = null;
             lock (_stateLock)
             {
-                if (_awaitingFile.Count > 0) { request = _awaitingFile.Dequeue(); }
+                Queue<RemoteEncodeRequest> pending;
+                if (_awaitingByConn.TryGetValue(conn, out pending) && pending.Count > 0)
+                {
+                    request = pending.Dequeue();
+                }
             }
 
-            if (request == null)
+            // COMPATIBILITY: an older client streams FILE_BEGIN without SEND_REQUEST. Park its
+            // connection thread until the slot frees — TCP backpressure stalls the sender, so the
+            // one-transfer-at-a-time rule holds for old clients too (just without the nice status).
+            if (!_gate.IsHolder(conn))
             {
-                Logger.Error("EncodeServerHost: FILE_BEGIN with no pending job; draining and ignoring.");
-                // Must still consume the announced bytes or the framing desynchronizes.
-                FileTransfer.ReceiveFile(conn, msg, SafeStagingPath(_stagingRoot, "orphan_" + Guid.NewGuid().ToString("N")));
-                return;
+                Logger.Info("EncodeServerHost: FILE_BEGIN from '" + NameOf(conn) +
+                            "' without a granted slot (older client?); serializing via backpressure.");
+                _gate.WaitUntilHolder(conn, request != null ? request.ClientJobId : "");
             }
 
-            // CONTAINMENT: the client's name is flattened to a bare file name inside our staging
-            // folder. A malicious "..\..\evil" can't escape it.
-            string dest = SafeStagingPath(_stagingRoot,
-                Guid.NewGuid().ToString("N").Substring(0, 8) + "_" + (msg.GetString("name") ?? ""));
-
-            bool ok = FileTransfer.ReceiveFile(conn, msg, dest);
-            if (!ok)
+            try
             {
-                conn.Write(new NetMessage(MsgType.JobDone)
-                    .With("jobId", request.ClientJobId ?? "")
-                    .With("ok", false)
-                    .With("error", "File transfer failed integrity check; please resend."));
-                return;
-            }
+                if (request == null)
+                {
+                    Logger.Error("EncodeServerHost: FILE_BEGIN with no pending job; draining and ignoring.");
+                    // Must still consume the announced bytes or the framing desynchronizes.
+                    FileTransfer.ReceiveFile(conn, msg, SafeStagingPath(_stagingRoot, "orphan_" + Guid.NewGuid().ToString("N")));
+                    return;
+                }
 
-            // Plan with the SHARED planner: identical naming/placement to a local encode, but using
-            // THIS machine's library roots and preset files.
-            EncodeJob job = _planner.BuildEncodeJob(request.Metadata, dest, request.TitleIndex);
-            if (job == null)
+                // CONTAINMENT: the client's name is flattened to a bare file name inside our staging
+                // folder. A malicious "..\..\evil" can't escape it.
+                string dest = SafeStagingPath(_stagingRoot,
+                    Guid.NewGuid().ToString("N").Substring(0, 8) + "_" + (msg.GetString("name") ?? ""));
+
+                bool ok = FileTransfer.ReceiveFile(conn, msg, dest);
+                if (!ok)
+                {
+                    conn.Write(new NetMessage(MsgType.JobDone)
+                        .With("jobId", request.ClientJobId ?? "")
+                        .With("ok", false)
+                        .With("error", "File transfer failed integrity check; please resend."));
+                    return;
+                }
+
+                // Plan with the SHARED planner: identical naming/placement to a local encode, but using
+                // THIS machine's library roots and preset files.
+                EncodeJob job = _planner.BuildEncodeJob(request.Metadata, dest, request.TitleIndex);
+                if (job == null)
+                {
+                    Logger.Error("EncodeServerHost: job " + request.ClientJobId + " had no usable title mapping; refusing.");
+                    conn.Write(new NetMessage(MsgType.JobDone)
+                        .With("jobId", request.ClientJobId ?? "")
+                        .With("ok", false)
+                        .With("error", "No episode/feature mapping for this title; nothing to encode."));
+                    TryDelete(dest);
+                    return;
+                }
+
+                lock (_stateLock)
+                {
+                    _jobOwners[job.Id] = new JobOwner
+                    {
+                        ClientJobId = request.ClientJobId ?? "",
+                        ClientName = NameOf(conn)
+                    };
+                }
+                _encodeQueue.Enqueue(job);
+            }
+            finally
             {
-                Logger.Error("EncodeServerHost: job " + request.ClientJobId + " had no usable title mapping; refusing.");
-                conn.Write(new NetMessage(MsgType.JobDone)
-                    .With("jobId", request.ClientJobId ?? "")
-                    .With("ok", false)
-                    .With("error", "No episode/feature mapping for this title; nothing to encode."));
-                TryDelete(dest);
-                return;
+                // Success or failure, this transfer is over — pass the slot to the next ripper in line.
+                DeliverGateNotices(_gate.Release(conn));
             }
-
-            lock (_stateLock) { _clientJobIds[job.Id] = request.ClientJobId ?? ""; }
-            _encodeQueue.Enqueue(job);
         }
 
-        // ---------------- queue events -> push to client ----------------
+        /// <summary>Pushes gate decisions (go-ahead / new position) to the clients they belong to.</summary>
+        private void DeliverGateNotices(List<TransferGate.Notice> notices)
+        {
+            foreach (TransferGate.Notice n in notices)
+            {
+                var target = n.Owner as PeerConnection;
+                if (target == null) { continue; }
+                try
+                {
+                    target.Write(n.Granted
+                        ? new NetMessage(MsgType.SendGrant).With("jobId", n.JobId ?? "")
+                        : new NetMessage(MsgType.SendWait).With("jobId", n.JobId ?? "").With("position", n.Position));
+                }
+                catch (Exception ex)
+                {
+                    // The peer may be mid-disconnect; its RemoveOwner cleanup re-passes the slot.
+                    Logger.Info("EncodeServerHost: gate notice push failed (" + ex.Message + ").");
+                }
+            }
+        }
+
+        private string NameOf(PeerConnection conn)
+        {
+            lock (_stateLock)
+            {
+                string name;
+                return _connNames.TryGetValue(conn, out name) ? name : "(unknown)";
+            }
+        }
+
+        // ---------------- queue events -> push to owning client ----------------
 
         private void OnQueueJobUpdated(EncodeJob job)
         {
             var mirror = JobUpdated; if (mirror != null) { mirror(job); }
 
-            string clientJobId = ClientJobIdFor(job.Id);
-            if (clientJobId == null) { return; } // not a remote job
+            JobOwner owner = OwnerFor(job.Id);
+            if (owner == null) { return; } // not a remote job
 
-            PeerConnection client = _server.CurrentClient;
-            if (client == null) { return; } // ripper offline; encodes continue, updates resume on rejoin
+            PeerConnection client = _server.FindClientByName(owner.ClientName);
+            if (client == null) { return; } // that ripper is offline; encodes continue, updates resume on rejoin
 
             try
             {
                 client.Write(new NetMessage(MsgType.Progress)
-                    .With("jobId", clientJobId)
+                    .With("jobId", owner.ClientJobId)
                     .With("percent", job.ProgressPercent)
                     .With("status", job.Status.ToString())
                     .With("operation", job.CurrentOperation ?? ""));
@@ -207,14 +364,14 @@ namespace MediaRipperEncoder.Services.Net
             // The received staging input is no longer needed once encoded.
             TryDelete(job.InputFile);
 
-            string clientJobId = ClientJobIdFor(job.Id);
-            PeerConnection client = _server.CurrentClient;
-            if (clientJobId != null && client != null)
+            JobOwner owner = OwnerFor(job.Id);
+            PeerConnection client = owner != null ? _server.FindClientByName(owner.ClientName) : null;
+            if (owner != null && client != null)
             {
                 try
                 {
                     client.Write(new NetMessage(MsgType.JobDone)
-                        .With("jobId", clientJobId)
+                        .With("jobId", owner.ClientJobId)
                         .With("ok", ok)
                         .With("finalPath", result != null && result.FinalPath != null ? result.FinalPath : "")
                         .With("error", error));
@@ -226,12 +383,12 @@ namespace MediaRipperEncoder.Services.Net
             }
         }
 
-        private string ClientJobIdFor(Guid encodeJobId)
+        private JobOwner OwnerFor(Guid encodeJobId)
         {
             lock (_stateLock)
             {
-                string id;
-                return _clientJobIds.TryGetValue(encodeJobId, out id) ? id : null;
+                JobOwner owner;
+                return _jobOwners.TryGetValue(encodeJobId, out owner) ? owner : null;
             }
         }
 

@@ -113,6 +113,8 @@ namespace MediaRipperEncoder.Forms
             if (_settings.NodeRole == NodeRole.RipperClient && _pipeline.IsRemoteRipper)
             {
                 _pipeline.RemoteConnectionChanged += OnRemoteConnectionChanged;
+                // e.g. "the server is at its ripper limit" — say WHY we're waiting, not just "reconnecting…".
+                _pipeline.RemoteNotice += text => UI(() => SetStatus(text, true));
                 _encodeGroup.Text = "Encode queue → remote encoder (" + _settings.NodeServerHost + ") — connecting…";
             }
             else if (_settings.NodeRole == NodeRole.RipperClient)
@@ -164,6 +166,15 @@ namespace MediaRipperEncoder.Forms
             {
                 _encodeServer = new Services.Net.EncodeServerHost(_settings);
                 _encodeServer.JobUpdated += job => OnEncodeJobUpdated(job); // reuse the encode list UI
+                // Live roster in the panel title: how many rippers are connected, and who.
+                _encodeServer.ClientsChanged += (count, max, names) => UI(() =>
+                {
+                    _encodeGroup.Text = count == 0
+                        ? "Encode queue (Encoder Server — port " + _settings.NodePort + " — no rippers connected)"
+                        : "Encode queue (Encoder Server — port " + _settings.NodePort + " — " +
+                          count + "/" + max + " ripper" + (count == 1 ? "" : "s") + ": " +
+                          string.Join(", ", names) + ")";
+                });
                 _encodeServer.Start();
                 _encodeGroup.Text = "Encode queue (Encoder Server — listening on port " + _settings.NodePort + ")";
                 SetStatus("Encoder Server node running on port " + _settings.NodePort +

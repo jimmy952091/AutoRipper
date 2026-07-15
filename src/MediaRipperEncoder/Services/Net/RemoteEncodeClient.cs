@@ -70,6 +70,12 @@ namespace MediaRipperEncoder.Services.Net
         /// <summary>Upload progress for the file currently being transferred (jobId, sent, total).</summary>
         public event Action<string, long, long> UploadProgress;
 
+        /// <summary>
+        /// A human-readable connection notice worth showing in the status bar — e.g. "the server
+        /// is at its ripper limit; waiting for a slot". Background thread.
+        /// </summary>
+        public event Action<string> Notice;
+
         public bool IsConnected { get { return _connected; } }
 
         public RemoteEncodeClient(string host, int port, string sharedSecret, string clientName = null)
@@ -124,7 +130,13 @@ namespace MediaRipperEncoder.Services.Net
                     if (!client.Connect(_host, _port))
                     {
                         // Server unreachable — wait (with capped backoff) and try again. This is the
-                        // reboot-resilience: we just keep knocking until the server is back.
+                        // reboot-resilience: we just keep knocking until the server is back. If the
+                        // server gave a REASON (e.g. it's full), surface it so the user isn't staring
+                        // at a bare "reconnecting…".
+                        if (!string.IsNullOrEmpty(client.LastFailure))
+                        {
+                            var notice = Notice; if (notice != null) { notice(client.LastFailure); }
+                        }
                         SetConnected(false);
                         if (WaitOrStop(backoffMs)) { return; }
                         backoffMs = Math.Min(backoffMs * 2, 15000);
@@ -219,6 +231,37 @@ namespace MediaRipperEncoder.Services.Net
                     return;
                 }
                 HandlePush(msg);
+            }
+
+            // MULTI-RIPPER ETIQUETTE (protocol 2+): ask for the transfer slot before streaming.
+            // If another ripper is mid-transfer the server parks us in a FIFO line and tells us our
+            // position, which we surface in the UI — much clearer than a progress bar frozen at 0%.
+            // An older (protocol 1) server doesn't know SEND_REQUEST, so we skip straight to sending.
+            if (client.ServerProtocol >= 2)
+            {
+                client.Send(new NetMessage(MsgType.SendRequest).With("jobId", jobId));
+                bool granted = false;
+                while (!granted)
+                {
+                    NetMessage msg = client.Receive();
+                    if (msg == null) { throw new System.IO.IOException("Connection lost awaiting the transfer slot."); }
+                    if (msg.Type == MsgType.SendGrant) { granted = true; }
+                    else if (msg.Type == MsgType.SendWait && msg.GetString("jobId") == jobId)
+                    {
+                        int position = msg.GetInt("position");
+                        Logger.Info("RemoteEncodeClient: waiting to send " + jobId +
+                                    " (position " + position + " — another ripper is transferring).");
+                        Raise(new RemoteJobStatus
+                        {
+                            ClientJobId = jobId,
+                            Status = "Waiting to send",
+                            Operation = "Another ripper is sending — position " + position + " in line"
+                        });
+                    }
+                    else if (msg.Type == MsgType.Heartbeat) { /* our idle echo arriving late */ }
+                    else { HandlePush(msg); } // PROGRESS/JOB_DONE for earlier jobs keep flowing while we wait
+                }
+                Raise(new RemoteJobStatus { ClientJobId = jobId, Status = "Sending", Operation = "Transferring file to the encoder server" });
             }
 
             // Stream the file. If this throws (link died mid-transfer), the job stays at the head

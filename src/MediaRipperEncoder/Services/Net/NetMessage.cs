@@ -17,6 +17,7 @@ namespace MediaRipperEncoder.Services.Net
         public const string AuthResponse = "AUTH_RESPONSE";   // client -> server: HMAC(secret, nonce) as hex
         public const string AuthFail = "AUTH_FAIL";        // server -> client: bad/absent proof; connection will close
         public const string HelloAck = "HELLO_ACK";       // server -> client: accepted (server name, version, session id)
+        public const string ServerFull = "SERVER_FULL";   // server -> client: authenticated OK, but the client limit is reached; retry later
         public const string Heartbeat = "HEARTBEAT";      // both ways: keep-alive / detect a dropped peer
         public const string Rejoin = "REJOIN";            // client -> server: reconnecting, here's the session id I had
         public const string SessionState = "SESSION_STATE"; // server -> client: current queue snapshot (for resume)
@@ -24,6 +25,9 @@ namespace MediaRipperEncoder.Services.Net
         // Job + file transfer
         public const string JobSubmit = "JOB_SUBMIT";     // client -> server: metadata package + file size for one encode
         public const string JobAccepted = "JOB_ACCEPTED"; // server -> client: queued, here's its job id
+        public const string SendRequest = "SEND_REQUEST"; // client -> server: ready to stream the file for jobId; may I?
+        public const string SendWait = "SEND_WAIT";       // server -> client: another ripper is sending; you are position N in line
+        public const string SendGrant = "SEND_GRANT";     // server -> client: the transfer slot is yours; stream the file now
         public const string FileBegin = "FILE_BEGIN";     // client -> server: about to stream a file's bytes
         public const string FileChunk = "FILE_CHUNK";     // client -> server: one chunk (base64 in Data, or raw framing later)
         public const string FileEnd = "FILE_END";         // client -> server: file complete (checksum)

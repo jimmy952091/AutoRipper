@@ -20,6 +20,19 @@ namespace MediaRipperEncoder.Services.Net
         public string SessionId { get; private set; }
         public bool IsConnected { get { return _conn != null; } }
 
+        /// <summary>
+        /// Protocol level the server announced in HELLO_ACK. 1 = original (send files unasked);
+        /// 2+ = server expects SEND_REQUEST and answers SEND_GRANT/SEND_WAIT. Lets a new client
+        /// keep working against an older server.
+        /// </summary>
+        public int ServerProtocol { get; private set; }
+
+        /// <summary>
+        /// Human-readable reason the last <see cref="Connect"/> returned false ("" if none) — e.g.
+        /// the server was full — so the UI can say WHY it's waiting instead of a generic "reconnecting".
+        /// </summary>
+        public string LastFailure { get; private set; }
+
         /// <summary>The live connection, for streaming files (see <see cref="FileTransfer"/>). Null until connected.</summary>
         public PeerConnection Connection { get { return _conn; } }
 
@@ -70,12 +83,24 @@ namespace MediaRipperEncoder.Services.Net
                 NetMessage ack = _conn.Read();
                 if (ack != null && ack.Type == MsgType.AuthFail)
                 {
+                    LastFailure = "The server rejected our shared secret. Check both machines use the same value.";
                     Logger.Error("LanClient: server rejected our shared secret. Check both machines use the same value.");
+                    Dispose();
+                    return false;
+                }
+                if (ack != null && ack.Type == MsgType.ServerFull)
+                {
+                    // Authenticated fine, but every seat is taken. Not an error — we just retry
+                    // on the normal backoff until another ripper disconnects.
+                    LastFailure = "The encoder server is at its ripper limit (" + ack.GetInt("max") +
+                                  "). Waiting for a slot to free up...";
+                    Logger.Info("LanClient: " + LastFailure);
                     Dispose();
                     return false;
                 }
                 if (ack == null || ack.Type != MsgType.HelloAck)
                 {
+                    LastFailure = "The server did not complete the handshake.";
                     Logger.Error("LanClient: server did not return HELLO_ACK.");
                     Dispose();
                     return false;
@@ -83,6 +108,8 @@ namespace MediaRipperEncoder.Services.Net
 
                 ServerName = ack.GetString("server");
                 SessionId = ack.GetString("session");
+                ServerProtocol = ack.GetInt("proto", 1);
+                LastFailure = "";
                 Logger.Info("LanClient: connected to '" + ServerName + "' (session " + SessionId + ").");
                 return true;
             }

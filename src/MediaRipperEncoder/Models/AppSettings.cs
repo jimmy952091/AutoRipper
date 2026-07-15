@@ -131,6 +131,13 @@ namespace MediaRipperEncoder.Models
         /// </summary>
         public string NodeSharedSecret { get; set; }
 
+        /// <summary>
+        /// Server role only: how many ripper clients may be connected at once. Clients beyond the
+        /// limit are told "server full" and retry automatically. File transfers are serialized
+        /// regardless (one incoming file at a time); this only caps who can hold a session.
+        /// </summary>
+        public int NodeMaxClients { get; set; }
+
         public AppSettings()
         {
             // Sensible defaults for a brand-new install.
@@ -160,6 +167,7 @@ namespace MediaRipperEncoder.Models
             NodePort = 47820; // arbitrary high port for the LAN encode session
             NodeServerHost = "";
             NodeSharedSecret = "";
+            NodeMaxClients = 3;
         }
     }
 }
