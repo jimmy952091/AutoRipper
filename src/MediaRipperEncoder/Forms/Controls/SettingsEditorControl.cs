@@ -28,8 +28,7 @@ namespace MediaRipperEncoder.Forms.Controls
         private Label _handBrakeStatus;
         private Button _handBrakeValidate;
 
-        // HandBrake presets moved to Settings > Advanced (general, animation, and the UHD
-        // variants live together there). See BuildUi's note row.
+        // HandBrake presets live on the Advanced tab (PresetPathsPanel), not in this editor.
 
         // Metadata lookup API keys (per-user; never hardcoded/shipped)
         private TextBox _omdbKeyBox;
@@ -187,12 +186,6 @@ namespace MediaRipperEncoder.Forms.Controls
                 out _handBrakeBox, out _handBrakeValidate, out _handBrakeStatus,
                 "HandBrake CLI|HandBrakeCLI.exe|Executables (*.exe)|*.exe",
                 OnValidateHandBrake);
-
-            AddInfoLabel(
-                "HandBrake presets (general, animation, and the UHD/4K variants) are configured on " +
-                "the Advanced tab of Settings. Finish setup here, then set your preset there before " +
-                "your first encode.",
-                ref y);
 
             y += 8;
             y = AddSectionHeader("Metadata lookup — your own free API keys (never shared/built-in)", y);

@@ -21,6 +21,7 @@ namespace MediaRipperEncoder.Forms
     {
         private readonly AppSettings _settings;
         private readonly SettingsEditorControl _editor;
+        private readonly PresetPathsPanel _presetPanel;
 
         public SetupWizardForm(AppSettings settings)
         {
@@ -49,7 +50,10 @@ namespace MediaRipperEncoder.Forms
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // scrolling content
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 52)); // fixed button bar
 
-            // --- Row 0: scrollable content ---
+            // --- Row 0: tabbed content (General setup + Advanced presets) ---
+            var tabs = new TabControl { Dock = DockStyle.Fill };
+
+            var generalTab = new TabPage("General");
             var content = new Panel
             {
                 Dock = DockStyle.Fill,
@@ -73,8 +77,32 @@ namespace MediaRipperEncoder.Forms
             _editor.LoadFrom(settings);
             _editor.PrefillAutoDetected();
             content.Controls.Add(_editor);
+            generalTab.Controls.Add(content);
 
-            layout.Controls.Add(content, 0, 0);
+            // Advanced: the HandBrake preset files (the same shared panel as Settings → Advanced).
+            // Optional at setup — every slot can be filled in later — but exporting a preset from
+            // HandBrake's GUI is the one step new users most often haven't done yet, so give it a
+            // visible home in the wizard instead of a note pointing somewhere else.
+            var advancedTab = new TabPage("Advanced");
+            var advancedContent = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
+            var advancedIntro = new Label
+            {
+                Text = "Optional now, needed before your first encode: preset files exported from " +
+                       "HandBrake's GUI (Presets → Export). At minimum set the general preset; the " +
+                       "others can stay blank.",
+                AutoSize = false,
+                Location = new Point(15, 10),
+                Size = new Size(700, 34)
+            };
+            advancedContent.Controls.Add(advancedIntro);
+            _presetPanel = new PresetPathsPanel { Location = new Point(0, 52) };
+            _presetPanel.LoadFrom(settings);
+            advancedContent.Controls.Add(_presetPanel);
+            advancedTab.Controls.Add(advancedContent);
+
+            tabs.TabPages.Add(generalTab);
+            tabs.TabPages.Add(advancedTab);
+            layout.Controls.Add(tabs, 0, 0);
 
             // --- Row 1: fixed button bar, always visible ---
             layout.Controls.Add(BuildButtonBar(), 0, 1);
@@ -120,13 +148,14 @@ namespace MediaRipperEncoder.Forms
             // Pull the entered values into the settings object first so validation checks
             // exactly what will be saved.
             _editor.ApplyTo(_settings);
+            _presetPanel.ApplyTo(_settings);
 
             bool ok = _editor.RunFullValidation();
             if (!ok)
             {
                 MessageBox.Show(this,
-                    "Some required items didn't pass. Check the red status lines above — the " +
-                    "MakeMKV and HandBrake tools and the preset must validate, and the Movies, " +
+                    "Some required items didn't pass. Check the red status lines on the General " +
+                    "tab — the MakeMKV and HandBrake tools must validate, and the Movies, " +
                     "TV Shows, and Temp folders must be set.\r\n\r\n" +
                     "Tip: HandBrakeCLI is a SEPARATE download from the HandBrake app.",
                     "Setup not complete yet",
