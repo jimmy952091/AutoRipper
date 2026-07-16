@@ -25,9 +25,11 @@ from-scratch implementation as a Windows program (no ARM code is used).
 - **Audio CD ripping is built in** — no extra program. Raw digital extraction plus built-in
   encoders for **FLAC, MP3, OGG Vorbis, Opus, M4A/AAC, WMA, AIFF, and WAV**, tags written
   inside every file, album art embedded and saved as `cover.jpg`.
-- **Distributed mode (optional, LAN only)**: rip on one PC while a stronger machine encodes.
-  A Client Node ships each finished rip to a Server Node with checksummed transfer, live
-  synced progress, and automatic reconnect — a weak laptop can feed a big server.
+- **Distributed mode (optional, LAN only)**: rip on one or SEVERAL PCs while a stronger
+  machine encodes. Multiple ripper Client Nodes (configurable limit) feed one encoder Server
+  Node; finished rips transfer one at a time in a fair first-come line ("Waiting to send —
+  position 2") with checksummed transfer, live synced progress, and automatic reconnect —
+  three PCs swapping discs can melt a big collection while one server does the heavy lifting.
 - **Runs on old hardware**: Windows 7 SP1 through Windows 11 / Server 2022, 1366x768 screens,
   single-core CPUs (see [COMPATIBILITY.md](COMPATIBILITY.md) for verified combinations and
   the Windows 7 HandBrake note). Light and Dark themes included.
@@ -42,22 +44,32 @@ from-scratch implementation as a Windows program (no ARM code is used).
   own licensing):
   - **MakeMKV** — the normal installer already includes the command-line tool (`makemkvcon.exe`).
   - **HandBrakeCLI** — the *command-line* build (`HandBrakeCLI.exe`), a separate download from
-    handbrake.fr; the GUI app alone is not enough. On Windows 7/8, use HandBrake 1.4.x and
-    create your preset with that version (see COMPATIBILITY.md).
+    handbrake.fr; the GUI app alone is not enough. On Windows 7/8, use HandBrake 1.3.3 or
+    1.4.x and create your presets with that same version (see COMPATIBILITY.md).
 - For **audio CDs**: nothing — ripping and encoding are built in.
 
 ## Install
 
-Grab the MSI and run it, or deploy silently:
+Grab the MSI from [Releases](https://github.com/jimmy952091/AutoRipper/releases) and run it,
+or deploy silently:
 
 ```
-msiexec /i AutoRipper-0.1.0-x64.msi /qn
+msiexec /i AutoRipper-0.2.0-x64.msi /qn
 ```
 
 (`INSTALLDESKTOPSHORTCUT=0` skips the desktop shortcut; uninstall with `msiexec /x ... /qn`.)
 First launch walks you through tool paths and library folders, and validates every tool
 actually runs before letting you finish. **Help → Uninstall AutoRipper...** offers a full
 cleanup that also removes settings, logs, and registry entries if you're leaving for good.
+
+### "Windows protected your PC"?
+
+AutoRipper's MSI is not (yet) code-signed — certificates cost real money — so a fresh
+download will trip Windows SmartScreen. That warning means "new unsigned file," not
+"malware": click **More info → Run anyway** if you choose to trust it. You don't have to
+take that on faith — the complete source code is in this repository, the release page shows
+the SHA-256 of the exact MSI, and you can build the installer yourself from source (below)
+and compare.
 
 ## Build from source
 
