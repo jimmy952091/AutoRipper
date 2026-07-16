@@ -128,4 +128,6 @@ It may be sold, but it can never be made proprietary or locked behind a closed p
 
 Bundled third-party libraries: Newtonsoft.Json (MIT), TagLib# (LGPL-2.1), CUETools codecs
 (GPL), NAudio (MIT), NAudio.Lame + libmp3lame (LGPL), OggVorbisEncoder (MIT-ish Xiph port),
-Concentus (MIT/Xiph). External tools (MakeMKV, HandBrake) are user-supplied and never bundled.
+Concentus (MIT/Xiph), BouncyCastle (MIT — the modern-TLS fallback that keeps MusicBrainz
+lookups working on Windows 7). External tools (MakeMKV, HandBrake) are user-supplied and
+never bundled.

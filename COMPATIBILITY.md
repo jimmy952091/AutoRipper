@@ -35,18 +35,19 @@ Real-world verified combinations. "Verified" means actually run on hardware, not
   the safe choice. (Key settings if rebuilding by hand: encoder preset *slow*, profile High,
   level Auto, RF 18, framerate Same-as-source/VFR, no subtitle tracks.)
 - **MakeMKV: the current version installs and runs on Windows 7 with no issues (verified).**
-- **MusicBrainz (audio-CD lookup) on Windows 7: NOT POSSIBLE — confirmed Windows limitation
-  (2026-07-15, fully patched install).** Two separate causes were found. The first — missing
-  modern root certificates on old installs — is fixed in-app (AutoRipper embeds DigiCert
-  Global Root G2 and ISRG Root X1 as pinned fallback trust anchors; validation is not
-  weakened). The second is the hard blocker: **Windows 7's TLS layer (SChannel) lacks the
-  modern cipher suites musicbrainz.org's servers require** (the needed ECDHE+AES-GCM suites
-  were added in Windows 8), so the handshake fails with "Could not create SSL/TLS secure
-  channel" even with every Windows update installed. .NET applications delegate TLS to
-  Windows, so **no application-level fix exists**. AutoRipper detects this case and explains
-  it in plain language in the UI. Workaround: rip music CDs on a Windows 8-or-newer machine.
-  Video ripping on Windows 7 — including Client Node mode — is unaffected (the node link is
-  plain LAN TCP, not TLS).
+- **MusicBrainz (audio-CD lookup) on Windows 7: WORKS as of v0.2.1** — verified on a fully
+  patched Windows 7 Home Premium laptop. The underlying Windows limitation is real and
+  remains: Windows 7's TLS layer (SChannel) lacks the modern cipher suites musicbrainz.org's
+  servers require (added in Windows 8), so the OS handshake fails with "Could not create
+  SSL/TLS secure channel" no matter how updated the machine is. AutoRipper now detects that
+  exact failure and transparently redoes the lookup over its own bundled modern-TLS engine
+  (BouncyCastle) — its own cipher suites, Windows crypto not involved. The fallback is
+  deliberately narrow: it can only contact MusicBrainz / Cover Art Archive (plus the
+  archive.org hosts cover images redirect to), HTTPS only, with full certificate chain and
+  hostname validation (including the pinned-root rule below). Modern Windows never uses it —
+  the OS TLS stack stays in charge there. Root-certificate note (separate, also handled):
+  old installs missing DigiCert Global Root G2 / ISRG Root X1 get them as pinned fallback
+  trust anchors; validation is not weakened.
 
 ## Distributed (two-machine) mode
 
