@@ -98,9 +98,46 @@ namespace MediaRipperEncoder.Services
         }
 
         /// <summary>
+        /// Best-effort removal of a taskbar pin for this exe. Windows gives installers no
+        /// supported way to unpin, so the MSI can't do this — but the app CAN ask the shell to
+        /// unpin itself before uninstalling, via the same verb the right-click menu uses.
+        /// Failure is fine (nothing pinned, older Windows) — a dead pin is cosmetic; we just try.
+        /// Uses reflection-based COM so no extra assembly references are needed.
+        /// </summary>
+        public static void TryUnpinFromTaskbar(string exePath)
+        {
+            try
+            {
+                Type shellType = Type.GetTypeFromProgID("Shell.Application");
+                if (shellType == null) { return; }
+                object shell = Activator.CreateInstance(shellType);
+
+                object folder = shellType.InvokeMember("Namespace",
+                    System.Reflection.BindingFlags.InvokeMethod, null, shell,
+                    new object[] { Path.GetDirectoryName(exePath) });
+                if (folder == null) { return; }
+
+                object item = folder.GetType().InvokeMember("ParseName",
+                    System.Reflection.BindingFlags.InvokeMethod, null, folder,
+                    new object[] { Path.GetFileName(exePath) });
+                if (item == null) { return; }
+
+                // "taskbarunpin" is the canonical (language-independent) verb name.
+                item.GetType().InvokeMember("InvokeVerb",
+                    System.Reflection.BindingFlags.InvokeMethod, null, item,
+                    new object[] { "taskbarunpin" });
+                Logger.Info("Uninstall: asked the shell to unpin " + exePath + " from the taskbar.");
+            }
+            catch (Exception ex)
+            {
+                Logger.Info("Uninstall: taskbar unpin skipped (" + ex.Message + ").");
+            }
+        }
+
+        /// <summary>
         /// Runs the uninstall. If <paramref name="purgeUserData"/>, user data is deleted FIRST
-        /// (while we can still read our own folders), then the MSI removal is launched. The app
-        /// must exit right after so msiexec can delete the running exe.
+        /// (while we can still read our own folders), then the MSI removal is launched. The
+        /// caller must hard-exit the app immediately after this returns.
         /// </summary>
         public static void RunUninstall(bool purgeUserData, out string dataSummary, out bool msiLaunched)
         {
@@ -109,6 +146,10 @@ namespace MediaRipperEncoder.Services
 
             string uninstallCommand = FindMsiUninstallCommand();
             if (string.IsNullOrEmpty(uninstallCommand)) { return; }
+
+            // Unpin our own taskbar icon while we still exist — after msiexec deletes the exe,
+            // the pin would be a dead button pointing at nothing.
+            TryUnpinFromTaskbar(System.Windows.Forms.Application.ExecutablePath);
 
             try
             {
@@ -121,7 +162,16 @@ namespace MediaRipperEncoder.Services
                 {
                     args += " /qb";
                 }
-                Process.Start(new ProcessStartInfo(exe, args) { UseShellExecute = true });
+
+                // Launch through cmd with a ~2 s delay so THIS process is fully gone before
+                // msiexec reaches its file-removal pass. 0.1.0 started msiexec directly and the
+                // still-exiting exe was seen as "in use" — the program files got left behind.
+                string delayed = "/c ping -n 3 127.0.0.1 >nul & \"" + exe + "\" " + args;
+                Process.Start(new ProcessStartInfo("cmd.exe", delayed)
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                });
                 msiLaunched = true;
             }
             catch (Exception ex)

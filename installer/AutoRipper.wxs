@@ -49,6 +49,18 @@
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="AutoRipper">
         <Files Include="$(var.PublishDir)\**" />
+
+        <!-- Uninstall sweep: remove ANY file still in the install folder (a binary that was
+             locked mid-uninstall, a stray log) and then the folder itself, so an uninstall can
+             never leave program files behind. Found the hard way: 0.1.0's uninstall left the
+             exe + DLLs when the app hadn't fully exited before msiexec's file-removal pass. -->
+        <Component Id="SweepInstallFolder">
+          <RegistryKey Root="HKLM" Key="Software\AutoRipper" ForceDeleteOnUninstall="yes">
+            <RegistryValue Name="InstallFolderSweep" Type="integer" Value="1" KeyPath="yes" />
+          </RegistryKey>
+          <RemoveFile Id="SweepLeftoverFiles" Name="*" On="uninstall" />
+          <RemoveFolder Id="RemoveInstallFolder" On="uninstall" />
+        </Component>
       </Directory>
     </StandardDirectory>
 
@@ -62,9 +74,15 @@
                     Target="[INSTALLFOLDER]AutoRipper.exe"
                     WorkingDirectory="INSTALLFOLDER" />
           <RemoveFolder Id="RemoveAppMenuFolder" Directory="AppMenuFolder" On="uninstall" />
-          <!-- Shortcuts can't be a component KeyPath; a per-user registry marker is the standard pattern. -->
-          <RegistryValue Root="HKCU" Key="Software\AutoRipper" Name="StartMenuShortcut"
-                         Type="integer" Value="1" KeyPath="yes" />
+          <!-- Shortcuts can't be a component KeyPath; a per-user registry marker is the standard
+               pattern. CRITICAL: this key must NOT be Software\AutoRipper — the in-app
+               "leave nothing behind" purge deletes that tree BEFORE msiexec runs, and with its
+               KeyPath gone Windows Installer decides the shortcut component "isn't installed"
+               and skips removing the shortcut. That's exactly the 0.1.0 leftover-Start-menu bug.
+               Software\AutoRipperSetup is owned by the MSI alone and removed on uninstall. -->
+          <RegistryKey Root="HKCU" Key="Software\AutoRipperSetup" ForceDeleteOnUninstall="yes">
+            <RegistryValue Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+          </RegistryKey>
         </Component>
       </Directory>
     </StandardDirectory>
@@ -79,8 +97,10 @@
                   Description="Automated disc ripping and encoding for media servers"
                   Target="[INSTALLFOLDER]AutoRipper.exe"
                   WorkingDirectory="INSTALLFOLDER" />
-        <RegistryValue Root="HKCU" Key="Software\AutoRipper" Name="DesktopShortcut"
-                       Type="integer" Value="1" KeyPath="yes" />
+        <!-- Same rule as the Start menu marker: never Software\AutoRipper (see above). -->
+        <RegistryKey Root="HKCU" Key="Software\AutoRipperSetup" ForceDeleteOnUninstall="yes">
+          <RegistryValue Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+        </RegistryKey>
       </Component>
     </StandardDirectory>
 

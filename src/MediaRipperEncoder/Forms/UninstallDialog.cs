@@ -107,10 +107,14 @@ namespace MediaRipperEncoder.Forms
                 return;
             }
 
-            // The MSI remover is now running and will delete the exe — close the app so it can.
+            // The MSI remover starts in ~2 s and will delete this exe. Hard-exit NOW —
+            // Application.Exit only ends the message loop and can leave the process alive long
+            // enough for msiexec to see the exe as "in use" and leave the program files behind
+            // (the 0.1.0 leftover-files bug). Skipping normal shutdown is fine here: no rip or
+            // encode runs during uninstall, and the process is about to be deleted anyway.
             DialogResult = DialogResult.OK;
             Close();
-            Application.Exit();
+            Environment.Exit(0);
         }
     }
 }
