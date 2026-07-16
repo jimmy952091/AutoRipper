@@ -13,7 +13,7 @@
          worth a repo-wide rename. -->
     <AssemblyName>AutoRipper</AssemblyName>
     <Product>AutoRipper</Product>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Copyright>Copyright (C) 2026 James Spurgeon (heto.black@gmail.com)</Copyright>
     <!-- SPDX license identifier. Strong copyleft incl. network use — see /LICENSE. -->
     <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
