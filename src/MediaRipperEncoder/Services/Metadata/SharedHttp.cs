@@ -92,6 +92,13 @@ namespace MediaRipperEncoder.Services.Metadata
             new X509Certificate2(Convert.FromBase64String(DigiCertGlobalRootG2Pem))
         };
 
+        /// <summary>The embedded fallback trust anchors, shared with <see cref="LegacyTlsHttp"/>
+        /// so the BouncyCastle transport applies the exact same pinned-root rule.</summary>
+        public static X509Certificate2[] PinnedTrustAnchors
+        {
+            get { return (X509Certificate2[])PinnedRoots.Clone(); }
+        }
+
         private static bool _fallbackLogged;
 
         static SharedHttp()

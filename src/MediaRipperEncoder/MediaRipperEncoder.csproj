@@ -71,6 +71,11 @@
     <PackageReference Include="Concentus.Oggfile" Version="1.0.5" />
     <!-- Media Foundation wrapper: M4A/AAC and WMA use Windows' own built-in encoders. -->
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
+    <!-- Managed TLS engine (MIT, AGPL-compatible) for the Windows 7 fallback transport:
+         Win7's SChannel lacks the modern cipher suites musicbrainz.org requires, so on a
+         "secure channel" failure LegacyTlsHttp redoes the request over BouncyCastle TLS
+         (own ciphers, OS crypto not involved). Modern Windows never touches this path. -->
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.4.0" />
   </ItemGroup>
 
 </Project>

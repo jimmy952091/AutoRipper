@@ -29,6 +29,15 @@ namespace MediaRipperEncoder.Services.Music
         private readonly HttpClient _http;
 
         /// <summary>
+        /// Set once the normal Windows TLS path has failed with a "secure channel" error and the
+        /// BouncyCastle fallback transport (<see cref="LegacyTlsHttp"/>) worked — subsequent
+        /// requests go straight to the fallback instead of re-failing first. Static because the
+        /// OS capability it reflects is machine-wide, not per-client-instance.
+        /// </summary>
+        private static volatile bool _preferLegacyTransport;
+        private static bool _legacySwitchLogged;
+
+        /// <summary>
         /// The exception behind the most recent discid/TOC lookup that returned an empty list
         /// because of a NETWORK failure — null when the disc genuinely isn't in the database.
         /// Lets the UI distinguish "unknown disc, try typing it" (normal) from "couldn't reach
@@ -123,16 +132,32 @@ namespace MediaRipperEncoder.Services.Music
         /// <summary>Front cover art (500px) for a release, or null when the archive has none.</summary>
         public async Task<byte[]> GetCoverArtAsync(string releaseId)
         {
+            string url = CoverArtUrl + Uri.EscapeDataString(releaseId ?? "") + "/front-500";
             try
             {
-                using (var req = new HttpRequestMessage(HttpMethod.Get, CoverArtUrl +
-                    Uri.EscapeDataString(releaseId ?? "") + "/front-500"))
+                if (!_preferLegacyTransport)
                 {
-                    req.Headers.Add("User-Agent", UserAgent);
-                    HttpResponseMessage resp = await _http.SendAsync(req).ConfigureAwait(false);
-                    if (!resp.IsSuccessStatusCode) { return null; }
-                    return await resp.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+                    try
+                    {
+                        using (var req = new HttpRequestMessage(HttpMethod.Get, url))
+                        {
+                            req.Headers.Add("User-Agent", UserAgent);
+                            HttpResponseMessage resp = await _http.SendAsync(req).ConfigureAwait(false);
+                            if (!resp.IsSuccessStatusCode) { return null; }
+                            return await resp.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+                        }
+                    }
+                    catch (Exception ex) when (LegacyTlsHttp.LooksLikeSecureChannelFailure(ex))
+                    {
+                        SwitchToLegacyTransport(ex);
+                    }
                 }
+
+                // Windows TLS can't reach these hosts (Win7) — fetch over the built-in
+                // BouncyCastle transport instead. It follows the archive.org redirect itself.
+                LegacyTlsHttp.FetchResult result = await Task.Run(
+                    () => LegacyTlsHttp.Get(url, UserAgent)).ConfigureAwait(false);
+                return result.StatusCode >= 200 && result.StatusCode < 300 ? result.Body : null;
             }
             catch (Exception ex)
             {
@@ -179,11 +204,13 @@ namespace MediaRipperEncoder.Services.Music
 
             if (tlsFailure && isWindows7)
             {
-                return "Windows 7 can't make a secure connection to MusicBrainz. Its built-in " +
-                       "encryption predates what musicbrainz.org requires, even with every " +
-                       "Windows update installed — this is a limit of Windows 7 itself, not a " +
-                       "problem with the disc or your network. Rip music CDs on a machine " +
-                       "running Windows 8 or newer; video ripping on this machine is unaffected.";
+                // Windows 7's SChannel can't reach MusicBrainz, and normally AutoRipper's
+                // built-in modern-TLS fallback (LegacyTlsHttp) takes over silently — so if this
+                // message is showing, the FALLBACK failed too (network down, firewall, proxy).
+                return "Couldn't reach MusicBrainz. Windows 7's own secure-connection support " +
+                       "can't talk to it (an OS limit), and AutoRipper's built-in fallback " +
+                       "connection also failed — check your internet connection and the log " +
+                       "(%AppData%\\AutoRipper\\logs) for details.";
             }
             if (tlsFailure)
             {
@@ -194,6 +221,34 @@ namespace MediaRipperEncoder.Services.Music
         }
 
         private async Task<string> GetAsync(string url)
+        {
+            if (!_preferLegacyTransport)
+            {
+                try
+                {
+                    return await GetViaWindowsTlsAsync(url).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (LegacyTlsHttp.LooksLikeSecureChannelFailure(ex))
+                {
+                    // Windows' own TLS can't negotiate with this server (Windows 7's SChannel
+                    // lacks the needed cipher suites). Retry over the built-in BouncyCastle
+                    // transport — the "translator" — and stay on it for future requests.
+                    SwitchToLegacyTransport(ex);
+                }
+            }
+
+            LegacyTlsHttp.FetchResult result = await Task.Run(
+                () => LegacyTlsHttp.Get(url, UserAgent, "application/json")).ConfigureAwait(false);
+            if (result.StatusCode < 200 || result.StatusCode >= 300)
+            {
+                // Same message shape as the normal path, so "(HTTP 404)" keeps meaning
+                // "unknown disc, use the fallback lookup" to every caller.
+                throw new Exception("MusicBrainz request failed (HTTP " + result.StatusCode + ").");
+            }
+            return result.BodyText;
+        }
+
+        private async Task<string> GetViaWindowsTlsAsync(string url)
         {
             using (var req = new HttpRequestMessage(HttpMethod.Get, url))
             {
@@ -206,6 +261,18 @@ namespace MediaRipperEncoder.Services.Music
                     throw new Exception("MusicBrainz request failed (HTTP " + (int)resp.StatusCode + ").");
                 }
                 return body;
+            }
+        }
+
+        private static void SwitchToLegacyTransport(Exception cause)
+        {
+            _preferLegacyTransport = true;
+            if (!_legacySwitchLogged)
+            {
+                _legacySwitchLogged = true;
+                Logger.Info("MusicBrainz: Windows' TLS can't reach the server (" + cause.Message +
+                            ") — switching to AutoRipper's built-in modern-TLS transport. This is " +
+                            "expected on Windows 7; lookups will work normally through it.");
             }
         }
 
