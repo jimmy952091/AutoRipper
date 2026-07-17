@@ -24,7 +24,7 @@ namespace MediaRipperEncoder.Services.Music
     {
         private const string BaseUrl = "https://musicbrainz.org/ws/2";
         private const string CoverArtUrl = "https://coverartarchive.org/release/";
-        private const string UserAgent = "AutoRipper/0.2.1 (heto.black@gmail.com)";
+        private const string UserAgent = "AutoRipper/0.2.2 (heto.black@gmail.com)";
 
         private readonly HttpClient _http;
 
