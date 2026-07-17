@@ -42,6 +42,11 @@
          msiexec ... INSTALLDESKTOPSHORTCUT=0 -->
     <Property Id="INSTALLDESKTOPSHORTCUT" Value="1" />
 
+    <!-- Record the install folder in Add/Remove Programs (InstallLocation). The app reads it
+         at startup to warn when an OUTDATED loose copy is being run while a newer version is
+         properly installed (the stale-shortcut trap). -->
+    <SetProperty Id="ARPINSTALLLOCATION" Value="[INSTALLFOLDER]" After="CostFinalize" />
+
     <!-- Application files: harvested from the staged build output with a wildcard, so new
          dependencies (e.g. the music-encoder DLLs) can never be silently missing from the MSI.
          The build script stages the Release output minus debug symbols; the wildcard ships

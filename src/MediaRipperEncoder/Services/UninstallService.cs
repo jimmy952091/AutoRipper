@@ -60,6 +60,58 @@ namespace MediaRipperEncoder.Services
         }
 
         /// <summary>
+        /// Reads the MSI-registered AutoRipper install, if any: its version and install folder.
+        /// Lets a LOOSE COPY of the app (run from an old copied folder) notice that a newer
+        /// installed version exists — the exact confusion that made an updated machine appear
+        /// to still run 0.2.0: the MSI had upgraded Program Files fine, but the user's shortcut
+        /// launched a stale copied folder. Returns false when no MSI install is registered.
+        /// InstallLocation can be empty on installs made before it was recorded; callers fall
+        /// back to the default Program Files path.
+        /// </summary>
+        public static bool TryGetInstalledInfo(out Version installedVersion, out string installLocation)
+        {
+            installedVersion = null;
+            installLocation = null;
+            const string uninstallPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
+            foreach (RegistryView view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+            {
+                try
+                {
+                    using (RegistryKey baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view))
+                    using (RegistryKey uninstall = baseKey.OpenSubKey(uninstallPath))
+                    {
+                        if (uninstall == null) { continue; }
+                        foreach (string name in uninstall.GetSubKeyNames())
+                        {
+                            using (RegistryKey entry = uninstall.OpenSubKey(name))
+                            {
+                                if (entry == null) { continue; }
+                                string display = entry.GetValue("DisplayName") as string;
+                                if (!string.Equals(display, AppInfo.DisplayName, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    continue;
+                                }
+                                string versionText = entry.GetValue("DisplayVersion") as string;
+                                Version parsed;
+                                if (Version.TryParse(versionText ?? "", out parsed))
+                                {
+                                    installedVersion = parsed;
+                                    installLocation = entry.GetValue("InstallLocation") as string;
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("Reading installed-version info (" + view + ") failed.", ex);
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
         /// Finds the MSI uninstall command for AutoRipper by scanning the Windows uninstall registry
         /// (both 64- and 32-bit views) for our DisplayName. Returns null if the app isn't installed
         /// via the MSI (e.g. run from a copied folder), in which case only the data purge applies.

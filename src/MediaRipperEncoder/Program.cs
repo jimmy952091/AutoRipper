@@ -34,6 +34,7 @@ namespace MediaRipperEncoder
             AppInfo.MigrateLegacyAppData();
 
             Logger.Info("Application starting.");
+            WarnIfStaleLooseCopy();
             AppSettings settings = SettingsStore.Load();
             ThemeManager.Initialize(settings.Theme);
 
@@ -78,6 +79,62 @@ namespace MediaRipperEncoder
 
             Logger.Info("Opening main window.");
             Application.Run(new MainForm(settings));
+        }
+
+        /// <summary>
+        /// Warns when THIS exe is an outdated loose copy (an old copied folder) while a NEWER
+        /// version is properly installed — the trap where a user updates via the MSI, then
+        /// launches a stale shortcut and sees the old version in About, concluding the update
+        /// failed. Quiet in every legitimate case: running the installed copy itself, running a
+        /// same-or-newer loose copy (a dev build), or no MSI install present at all.
+        /// </summary>
+        private static void WarnIfStaleLooseCopy()
+        {
+            try
+            {
+                Version installed;
+                string installLocation;
+                if (!UninstallService.TryGetInstalledInfo(out installed, out installLocation)) { return; }
+
+                Version running = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+                if (running >= installed) { return; }
+
+                if (string.IsNullOrWhiteSpace(installLocation))
+                {
+                    // Installs made before InstallLocation was recorded — the MSI's fixed default.
+                    installLocation = System.IO.Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "AutoRipper");
+                }
+                string runningDir = System.IO.Path.GetDirectoryName(Application.ExecutablePath) ?? "";
+                if (string.Equals(runningDir.TrimEnd('\\'), installLocation.TrimEnd('\\'),
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return; // we ARE the installed copy (mid-upgrade oddity); nothing to say
+                }
+
+                string exe = System.IO.Path.Combine(installLocation, "AutoRipper.exe");
+                Logger.Info("Stale loose copy detected: running " + running + " from " + runningDir +
+                            " while " + installed + " is installed at " + installLocation + ".");
+                MessageBox.Show(
+                    "This copy of AutoRipper is version " + Trim(running) + ", running from:\r\n" +
+                    runningDir + "\r\n\r\n" +
+                    "But version " + Trim(installed) + " is installed at:\r\n" + installLocation + "\r\n\r\n" +
+                    "You are probably launching an old shortcut to a copied folder. Use the " +
+                    "installed version (" + exe + ") and delete this old folder — updates only " +
+                    "ever refresh the installed copy.",
+                    "An update is installed — but this isn't it",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            catch (Exception ex)
+            {
+                // A version check must never stop the app from starting.
+                Logger.Error("Loose-copy version check failed (continuing normally).", ex);
+            }
+        }
+
+        private static string Trim(Version v)
+        {
+            return v.Major + "." + v.Minor + "." + Math.Max(v.Build, 0);
         }
 
         /// <summary>
