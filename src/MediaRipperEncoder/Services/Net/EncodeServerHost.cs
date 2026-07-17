@@ -66,6 +66,10 @@ namespace MediaRipperEncoder.Services.Net
         /// <summary>Connected-ripper roster changed: (count, max, names) — for the server node's UI.</summary>
         public event Action<int, int, string[]> ClientsChanged;
 
+        /// <summary>Connection-security notice the server-node user should see in the UI (dead
+        /// session replaced after an outage; a same-name connection refused as a possible spoof).</summary>
+        public event Action<string> ServerNotice;
+
         public EncodeServerHost(AppSettings settings)
         {
             _settings = settings;
@@ -83,6 +87,7 @@ namespace MediaRipperEncoder.Services.Net
             _server.MessageReceived += OnMessage;
             _server.ClientConnected += OnClientConnected;
             _server.ClientDisconnected += OnClientDisconnected;
+            _server.Notice += text => { var h = ServerNotice; if (h != null) { h(text); } };
 
             _encodeQueue.JobUpdated += OnQueueJobUpdated;
             _encodeQueue.JobEncodedSuccessfully += OnEncodeDone;
@@ -244,7 +249,11 @@ namespace MediaRipperEncoder.Services.Net
                 string dest = SafeStagingPath(_stagingRoot,
                     Guid.NewGuid().ToString("N").Substring(0, 8) + "_" + (msg.GetString("name") ?? ""));
 
-                bool ok = FileTransfer.ReceiveFile(conn, msg, dest);
+                // The progress callback marks the uploader ALIVE throughout the transfer — its
+                // message pump is busy with raw bytes, so without this a long upload would look
+                // like silence and the client could be displaced by a same-name connection.
+                bool ok = FileTransfer.ReceiveFile(conn, msg, dest,
+                    (done, total) => _server.MarkActivity(conn));
                 if (!ok)
                 {
                     conn.Write(new NetMessage(MsgType.JobDone)
@@ -353,7 +362,13 @@ namespace MediaRipperEncoder.Services.Net
                 // correct for a possibly-headless server node.
                 result = EncodeFinisher.FinishAndPlace(job, null);
                 ok = result.Outcome != PlacementOutcome.Failed;
-                if (!ok) { error = "Encoded, but library placement failed (see server log)."; }
+                if (!ok)
+                {
+                    // Tell the RIPPER's user why and where — they may never look at the server.
+                    error = "Encoded, but library placement failed (" +
+                            (result.Error != null ? result.Error.Message : "see server log") +
+                            "). The finished file is safe on the server at: " + job.OutputFile;
+                }
             }
             catch (Exception ex)
             {

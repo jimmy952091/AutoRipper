@@ -33,7 +33,18 @@ namespace MediaRipperEncoder.Services.Net
         {
             public string Name;
             public PeerConnection Conn;
+
+            /// <summary>UTC ticks of the last message/file bytes received from this client —
+            /// the liveness signal that separates a dead session from a healthy one.</summary>
+            public long LastActivityTicks;
         }
+
+        /// <summary>
+        /// How recently a session must have spoken to count as ALIVE. Healthy clients heartbeat
+        /// every ~10 s and mark activity continuously during transfers, so 30 s of silence means
+        /// the connection died (e.g. a modem/router reboot killed it without a FIN).
+        /// </summary>
+        public const int LivenessWindowMs = 30000;
 
         // Live authenticated clients. Guarded by _clientsLock; iterate on a snapshot.
         private readonly List<ClientSession> _clients = new List<ClientSession>();
@@ -45,6 +56,11 @@ namespace MediaRipperEncoder.Services.Net
         /// <summary>Raised when a client completes the handshake / disconnects: (client name, its connection).</summary>
         public event Action<string, PeerConnection> ClientConnected;
         public event Action<string, PeerConnection> ClientDisconnected;
+
+        /// <summary>A connection-security event the server-node user should SEE (dead session
+        /// replaced after an outage; a same-name connection refused because the original is
+        /// still alive — possible name spoof). Raised on a connection thread.</summary>
+        public event Action<string> Notice;
 
         public LanServer(string serverName, string sessionId, string sharedSecret, int maxClients = 1)
         {
@@ -83,6 +99,27 @@ namespace MediaRipperEncoder.Services.Net
         /// Job ownership is tracked by NAME so a client that reboots and reconnects picks its
         /// progress pushes back up on the new connection.
         /// </summary>
+        /// <summary>
+        /// Marks a client as alive right now. The message pump does this automatically, but
+        /// during a FILE TRANSFER the pump thread is inside the raw byte read — the host calls
+        /// this from the transfer's progress callback so an uploading ripper never looks
+        /// "silent" (and can't be displaced by a same-name connection mid-upload).
+        /// </summary>
+        public void MarkActivity(PeerConnection conn)
+        {
+            lock (_clientsLock)
+            {
+                foreach (ClientSession s in _clients)
+                {
+                    if (ReferenceEquals(s.Conn, conn))
+                    {
+                        System.Threading.Interlocked.Exchange(ref s.LastActivityTicks, DateTime.UtcNow.Ticks);
+                        return;
+                    }
+                }
+            }
+        }
+
         public PeerConnection FindClientByName(string name)
         {
             lock (_clientsLock)
@@ -148,9 +185,19 @@ namespace MediaRipperEncoder.Services.Net
             }
         }
 
+        // A healthy client heartbeats every ~10 s when idle and streams bytes when busy, so 90 s
+        // of TOTAL silence means the connection is dead (e.g. a WiFi blip killed it without a
+        // FIN — TCP alone would wait forever). The read then throws, the session ends, and the
+        // seat is reclaimed. Writes get a shorter limit so pushing progress to a dead client can
+        // never hang an encode-queue event thread.
+        private const int ClientSilenceTimeoutMs = 90000;
+        private const int ClientSendTimeoutMs = 30000;
+
         private void ServeClient(TcpClient client)
         {
             client.NoDelay = true;
+            client.ReceiveTimeout = ClientSilenceTimeoutMs;
+            client.SendTimeout = ClientSendTimeoutMs;
             using (client)
             using (var conn = new PeerConnection(client))
             {
@@ -179,10 +226,76 @@ namespace MediaRipperEncoder.Services.Net
                     return;
                 }
 
+                // LIVENESS-CHECKED GHOST REPLACEMENT: a ripper reconnecting after a network
+                // outage may still have its OLD session here — that TCP connection died without
+                // a FIN, so its reads just sit waiting, and the ghost occupies a seat. But a
+                // same-name connection can also be an attacker (who somehow got the shared
+                // secret) or a misnamed second machine trying to KICK a healthy ripper off. The
+                // old session's own recent activity separates the two cases: healthy clients
+                // heartbeat every ~10 s, so a session silent for 30+ s is a corpse — replace it;
+                // a session that spoke recently is ALIVE — refuse the newcomer and tell the user.
+                ClientSession ghost = null;
+                bool refusedAsAlive = false;
+                lock (_clientsLock)
+                {
+                    foreach (ClientSession s in _clients)
+                    {
+                        if (string.Equals(s.Name, clientName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            long silentMs = (DateTime.UtcNow.Ticks -
+                                System.Threading.Interlocked.Read(ref s.LastActivityTicks)) / TimeSpan.TicksPerMillisecond;
+                            if (silentMs < LivenessWindowMs)
+                            {
+                                refusedAsAlive = true;  // original is healthy — refuse the newcomer
+                            }
+                            else
+                            {
+                                ghost = s;              // original is dead — reclaim its seat
+                                _clients.Remove(s);
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                if (refusedAsAlive)
+                {
+                    string warning = "Refused a connection claiming to be '" + clientName + "' — that " +
+                        "ripper is ALREADY connected and actively talking. If that machine did not just " +
+                        "try to reconnect, another device on your network may be using its name.";
+                    Logger.Error("LanServer: " + warning);
+                    var alert = Notice; if (alert != null) { alert(warning); }
+                    try
+                    {
+                        conn.Write(new NetMessage(MsgType.ServerFull)
+                            .With("max", _maxClients)
+                            .With("server", _serverName)
+                            .With("reason", "name-active"));
+                    }
+                    catch { /* peer may already be gone */ }
+                    return;
+                }
+
+                if (ghost != null)
+                {
+                    string info = "Ripper '" + clientName + "' reconnected after an outage — its dead " +
+                                  "previous session was replaced.";
+                    Logger.Info("LanServer: " + info);
+                    var notice = Notice; if (notice != null) { notice(info); }
+                    // Disposing wakes the ghost's serving thread out of its blocked read; that
+                    // thread then runs its normal disconnect cleanup (gate slot, pending queues).
+                    try { ghost.Conn.Dispose(); } catch { /* already dead — that's the theory */ }
+                }
+
                 // Capacity gate AFTER auth, so only a holder of the shared secret can even learn
                 // the server is full. Registering inside the lock makes check+add atomic — two
                 // clients racing for the last seat can't both win it.
-                var session = new ClientSession { Name = clientName, Conn = conn };
+                var session = new ClientSession
+                {
+                    Name = clientName,
+                    Conn = conn,
+                    LastActivityTicks = DateTime.UtcNow.Ticks
+                };
                 bool full;
                 lock (_clientsLock)
                 {
@@ -218,6 +331,8 @@ namespace MediaRipperEncoder.Services.Net
                     NetMessage msg;
                     while ((msg = conn.Read()) != null)
                     {
+                        // Anything received proves the client is alive (heartbeats included).
+                        System.Threading.Interlocked.Exchange(ref session.LastActivityTicks, DateTime.UtcNow.Ticks);
                         if (msg.Type == MsgType.Heartbeat)
                         {
                             conn.Write(new NetMessage(MsgType.Heartbeat));

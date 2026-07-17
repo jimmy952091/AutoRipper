@@ -221,8 +221,9 @@ namespace MediaRipperEncoder.Services.Net
             // handle those while waiting).
             while (true)
             {
-                NetMessage msg = client.Receive();
+                NetMessage msg = ReceiveKeepingLinkAlive(client);
                 if (msg == null) { throw new System.IO.IOException("Connection lost awaiting JOB_ACCEPTED."); }
+                if (msg.Type == MsgType.Heartbeat) { continue; } // our liveness echo
                 if (msg.Type == MsgType.JobAccepted) { break; }
                 if (msg.Type == MsgType.JobDone && msg.GetString("jobId") == jobId)
                 {
@@ -243,7 +244,7 @@ namespace MediaRipperEncoder.Services.Net
                 bool granted = false;
                 while (!granted)
                 {
-                    NetMessage msg = client.Receive();
+                    NetMessage msg = ReceiveKeepingLinkAlive(client);
                     if (msg == null) { throw new System.IO.IOException("Connection lost awaiting the transfer slot."); }
                     if (msg.Type == MsgType.SendGrant) { granted = true; }
                     else if (msg.Type == MsgType.SendWait && msg.GetString("jobId") == jobId)
@@ -270,6 +271,33 @@ namespace MediaRipperEncoder.Services.Net
             var up = UploadProgress;
             FileTransfer.SendFile(client.Connection, pending.FilePath, pending.Request.SourceFileName,
                 (sent, total) => { if (up != null) { up(jobId, sent, total); } });
+        }
+
+        /// <summary>
+        /// Receives the next message, but while NOTHING is arriving, sends a heartbeat every
+        /// ~10 s so a dead link is DETECTED instead of waited on forever. A wait for the
+        /// transfer slot can legitimately last as long as another ripper's whole upload; without
+        /// this, a WiFi blip during that wait (or awaiting JOB_ACCEPTED) left the session thread
+        /// blocked on a read that would never return. The heartbeat WRITE is what fails on a
+        /// dead connection (LanClient sets a send timeout), which throws us out to the
+        /// reconnect logic. Only reads when a frame has started arriving, so framing stays intact.
+        /// </summary>
+        private NetMessage ReceiveKeepingLinkAlive(LanClient client)
+        {
+            var network = client.Connection.RawStream as System.Net.Sockets.NetworkStream;
+            int idleMs = 0;
+            while (network != null && !network.DataAvailable)
+            {
+                if (!_running) { throw new System.IO.IOException("Client is shutting down."); }
+                Thread.Sleep(250);
+                idleMs += 250;
+                if (idleMs >= 10000)
+                {
+                    idleMs = 0;
+                    client.Send(new NetMessage(MsgType.Heartbeat));
+                }
+            }
+            return client.Receive();
         }
 
         private void HandlePush(NetMessage msg)

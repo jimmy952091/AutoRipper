@@ -142,6 +142,12 @@ namespace MediaRipperEncoder.Services
         /// scratch drive is usually not the library drive). File.Move handles cross-volume
         /// moves, but its overwrite overload doesn't exist on .NET Framework, so we delete an
         /// existing destination first when overwrite is requested.
+        ///
+        /// RETRIES on sharing violations: a freshly encoded multi-gigabyte file (a UHD movie
+        /// especially) is prime bait for antivirus scanners and indexers, whose brief exclusive
+        /// lock makes the very first Move attempt fail — which stranded a finished UHD encode
+        /// in the scratch folder on the server. Three attempts with growing pauses ride out a
+        /// scan; a persistent failure (disk full, permissions) still fails fast enough.
         /// </summary>
         private static void MoveAcrossVolumes(string source, string destination, bool overwrite)
         {
@@ -149,7 +155,27 @@ namespace MediaRipperEncoder.Services
             {
                 File.Delete(destination);
             }
-            File.Move(source, destination);
+
+            int[] pauseMs = { 0, 2000, 8000 };
+            for (int attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    if (pauseMs[attempt] > 0) { System.Threading.Thread.Sleep(pauseMs[attempt]); }
+                    File.Move(source, destination);
+                    return;
+                }
+                catch (IOException ex) when (attempt < pauseMs.Length - 1)
+                {
+                    Logger.Info("Placement move attempt " + (attempt + 1) + " failed (" + ex.Message +
+                                "); retrying — the file may be briefly locked by an antivirus scan.");
+                }
+                catch (UnauthorizedAccessException ex) when (attempt < pauseMs.Length - 1)
+                {
+                    Logger.Info("Placement move attempt " + (attempt + 1) + " failed (" + ex.Message +
+                                "); retrying — the file may be briefly locked by an antivirus scan.");
+                }
+            }
         }
 
         /// <summary>

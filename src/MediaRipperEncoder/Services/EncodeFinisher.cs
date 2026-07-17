@@ -63,7 +63,11 @@ namespace MediaRipperEncoder.Services
             }
             else if (result.Outcome == PlacementOutcome.Failed)
             {
-                job.CurrentOperation = "Encoded OK, but placing into the library FAILED.";
+                // Say WHY it failed and WHERE the finished file is sitting — an encode that
+                // took hours must never quietly strand its output in the scratch folder.
+                string reason = result.Error != null ? result.Error.Message : "see the log";
+                job.CurrentOperation = "Encoded OK, but placing into the library FAILED (" + reason +
+                    "). The finished file is safe at: " + job.OutputFile;
             }
             else
             {

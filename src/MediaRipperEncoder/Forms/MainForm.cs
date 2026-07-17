@@ -166,6 +166,10 @@ namespace MediaRipperEncoder.Forms
             {
                 _encodeServer = new Services.Net.EncodeServerHost(_settings);
                 _encodeServer.JobUpdated += job => OnEncodeJobUpdated(job); // reuse the encode list UI
+                // Connection-security events belong in front of the user, not buried in a log:
+                // "dead session replaced after an outage" (informational) and "same-name
+                // connection refused — possible spoof" (the one worth investigating).
+                _encodeServer.ServerNotice += text => UI(() => SetStatus(text, true));
                 // Live roster in the panel title: how many rippers are connected, and who.
                 _encodeServer.ClientsChanged += (count, max, names) => UI(() =>
                 {

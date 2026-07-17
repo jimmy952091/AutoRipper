@@ -51,7 +51,13 @@ namespace MediaRipperEncoder.Services.Net
         {
             try
             {
-                _tcp = new TcpClient { NoDelay = true };
+                // SendTimeout: writing into a connection that died without a FIN (WiFi blip)
+                // otherwise BLOCKS forever once the TCP buffer fills — which froze a mid-upload
+                // ripper solid. With a limit, the write throws, the session drops, and the
+                // reconnect/resend logic does its job. Reads deliberately have NO timeout: waits
+                // can be legitimately long (queued behind another ripper's transfer), and
+                // liveness is proven by periodic heartbeat WRITES instead.
+                _tcp = new TcpClient { NoDelay = true, SendTimeout = 30000 };
 
                 // TcpClient.Connect has no timeout overload on net48; use the async begin/end with a wait.
                 IAsyncResult ar = _tcp.BeginConnect(host, port, null, null);
@@ -90,10 +96,24 @@ namespace MediaRipperEncoder.Services.Net
                 }
                 if (ack != null && ack.Type == MsgType.ServerFull)
                 {
-                    // Authenticated fine, but every seat is taken. Not an error — we just retry
-                    // on the normal backoff until another ripper disconnects.
-                    LastFailure = "The encoder server is at its ripper limit (" + ack.GetInt("max") +
-                                  "). Waiting for a slot to free up...";
+                    if (ack.GetString("reason") == "name-active")
+                    {
+                        // The server sees an ACTIVE session with this machine's name. Either this
+                        // is a duplicate machine name on the LAN, or something is impersonating
+                        // this ripper — either way the user must know, not just see "waiting".
+                        LastFailure = "The server refused this connection: a ripper named '" +
+                                      _clientName + "' is already actively connected. If this " +
+                                      "machine just lost its connection, it will get in once the " +
+                                      "old session dies; otherwise another device on the network " +
+                                      "may be using this machine's name.";
+                    }
+                    else
+                    {
+                        // Every seat is taken. Not an error — we just retry on the normal
+                        // backoff until another ripper disconnects.
+                        LastFailure = "The encoder server is at its ripper limit (" + ack.GetInt("max") +
+                                      "). Waiting for a slot to free up...";
+                    }
                     Logger.Info("LanClient: " + LastFailure);
                     Dispose();
                     return false;
