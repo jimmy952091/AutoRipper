@@ -206,8 +206,11 @@ namespace MediaRipperEncoder.Services.Net
                 pending.Enqueue(request);
             }
             conn.Write(new NetMessage(MsgType.JobAccepted).With("jobId", request.ClientJobId ?? ""));
+            // Log WHAT the package says it is — when a library file comes out misnamed, this line
+            // proves whether the name was already wrong on arrival or got lost later (pairing).
             Logger.Info("EncodeServerHost: accepted job " + request.ClientJobId +
-                        " ('" + request.SourceFileName + "' from '" + NameOf(conn) + "', awaiting file).");
+                        " ('" + request.SourceFileName + "' from '" + NameOf(conn) + "', " +
+                        DescribePackage(request.Metadata) + ", awaiting file).");
         }
 
         /// <summary>
@@ -299,6 +302,8 @@ namespace MediaRipperEncoder.Services.Net
                         ClientName = NameOf(conn)
                     };
                 }
+                // The other half of the misnamed-file receipt: what this job will be placed AS.
+                Logger.Info("EncodeServerHost: job " + request.ClientJobId + " planned -> " + job.FinalTargetPath);
                 _encodeQueue.Enqueue(job);
             }
             finally
@@ -419,6 +424,33 @@ namespace MediaRipperEncoder.Services.Net
                 JobOwner owner;
                 return _jobOwners.TryGetValue(encodeJobId, out owner) ? owner : null;
             }
+        }
+
+        /// <summary>One-line description of what a metadata package claims to be, for the log.</summary>
+        public static string DescribePackage(MediaMetadata meta)
+        {
+            if (meta == null) { return "package: (none)"; }
+            if (meta.MediaType == MediaType.Movie)
+            {
+                int mapped = 0;
+                if (meta.TitleMappings != null)
+                {
+                    foreach (TitleMapping m in meta.TitleMappings)
+                    {
+                        if (m.Kind == TitleKind.Movie && m.Include) { mapped++; }
+                    }
+                }
+                string title = string.IsNullOrWhiteSpace(meta.MovieTitle) ? "(blank)" : meta.MovieTitle;
+                return mapped > 0
+                    ? "package: movie x" + mapped + " (multi-movie mappings)"
+                    : "package: movie '" + title + "' (" + (meta.Year ?? "") + ")";
+            }
+            if (meta.MediaType == MediaType.TvShow)
+            {
+                string show = string.IsNullOrWhiteSpace(meta.ShowName) ? "(blank)" : meta.ShowName;
+                return "package: tv '" + show + "' S" + meta.SeasonNumber;
+            }
+            return "package: " + meta.MediaType;
         }
 
         /// <summary>
