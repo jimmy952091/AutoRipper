@@ -35,6 +35,14 @@ namespace MediaRipperEncoder.Services
         /// </summary>
         public static LibraryTarget BuildMovie(string moviesRoot, string movieTitle, string year, string ext)
         {
+            if (string.IsNullOrWhiteSpace(movieTitle))
+            {
+                // Upstream guards (metadata form + server-side job validation) should make this
+                // unreachable — if it fires anyway, say so LOUDLY in the log so the incident can
+                // be traced instead of quietly shipping an "Untitled Movie" folder again.
+                Logger.Error("BuildMovie called with a BLANK movie title — placing as 'Untitled Movie'. " +
+                             "This should have been rejected upstream; please report how this happened.");
+            }
             string title = FilenameSanitizer.Sanitize(movieTitle, "Untitled Movie");
             string folderName = string.IsNullOrWhiteSpace(year)
                 ? title

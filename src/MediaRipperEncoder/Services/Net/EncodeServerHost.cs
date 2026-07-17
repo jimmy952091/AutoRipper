@@ -180,6 +180,20 @@ namespace MediaRipperEncoder.Services.Net
                 return;
             }
 
+            // Backstop for the "Untitled Movie" incident: a confirmed package with a BLANK name
+            // would encode for hours and then land under a meaningless folder. Refuse it now,
+            // loudly, on the RIPPER's screen — where the person who can fix it is sitting.
+            string nameProblem = DescribeMetadataNameProblem(request.Metadata);
+            if (nameProblem != null)
+            {
+                Logger.Error("EncodeServerHost: rejected job " + request.ClientJobId + " — " + nameProblem);
+                conn.Write(new NetMessage(MsgType.JobDone)
+                    .With("jobId", request.ClientJobId ?? "")
+                    .With("ok", false)
+                    .With("error", "Job rejected: " + nameProblem));
+                return;
+            }
+
             lock (_stateLock)
             {
                 Queue<RemoteEncodeRequest> pending;
@@ -405,6 +419,43 @@ namespace MediaRipperEncoder.Services.Net
                 JobOwner owner;
                 return _jobOwners.TryGetValue(encodeJobId, out owner) ? owner : null;
             }
+        }
+
+        /// <summary>
+        /// Returns a human-readable reason a confirmed metadata package still can't be safely
+        /// placed (blank movie title / show name — the "Untitled Movie" bug), or null when the
+        /// names are usable. Public + static so it's unit-testable.
+        /// </summary>
+        public static string DescribeMetadataNameProblem(MediaMetadata meta)
+        {
+            if (meta.MediaType == MediaType.Movie)
+            {
+                bool anyMovieMappings = false;
+                if (meta.TitleMappings != null)
+                {
+                    foreach (TitleMapping m in meta.TitleMappings)
+                    {
+                        if (m.Kind != TitleKind.Movie || !m.Include) { continue; }
+                        anyMovieMappings = true;
+                        if (string.IsNullOrWhiteSpace(m.MovieTitle))
+                        {
+                            return "a disc title is mapped to a movie with a BLANK name (it would " +
+                                   "be placed as 'Untitled Movie'). Re-run the lookup on the ripper.";
+                        }
+                    }
+                }
+                if (!anyMovieMappings && string.IsNullOrWhiteSpace(meta.MovieTitle))
+                {
+                    return "the movie title is blank (it would be placed as 'Untitled Movie'). " +
+                           "Re-run the lookup on the ripper.";
+                }
+            }
+            else if (meta.MediaType == MediaType.TvShow && string.IsNullOrWhiteSpace(meta.ShowName))
+            {
+                return "the show name is blank (episodes would be placed under 'Unknown Show'). " +
+                       "Re-run the lookup on the ripper.";
+            }
+            return null;
         }
 
         // ---------------- containment ----------------

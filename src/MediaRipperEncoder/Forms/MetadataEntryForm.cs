@@ -1154,7 +1154,9 @@ namespace MediaRipperEncoder.Forms
                     bool include = Convert.ToBoolean(row.Cells["Include"].Value ?? false);
                     var mr = (MovieRow)row.Tag;
                     if (!include) { continue; }
-                    if (!mr.Assigned) { anyCheckedUnassigned = true; continue; }
+                    // A row marked assigned but holding a BLANK title counts as unassigned — a
+                    // blank here once travelled all the way to an "Untitled Movie" library folder.
+                    if (!mr.Assigned || string.IsNullOrWhiteSpace(mr.MovieTitle)) { anyCheckedUnassigned = true; continue; }
                     mappings.Add(new TitleMapping
                     {
                         TitleIndex = mr.Title.Index,
@@ -1196,6 +1198,18 @@ namespace MediaRipperEncoder.Forms
                 meta.Year = _movieYear.Text.Trim();
                 meta.ImdbId = _confirmedImdbId;
                 meta.MatchConfirmed = true;
+
+                // The confirmed-lookup gate above doesn't stop the TITLE BOX from being empty at
+                // Process time (it stays editable after confirming) — and a blank title here once
+                // produced an "Untitled Movie" folder in a user's library. Refuse loudly instead.
+                if (meta.MovieTitle.Length == 0)
+                {
+                    MessageBox.Show(this,
+                        "The movie title box is empty — the file would be placed as 'Untitled Movie'. " +
+                        "Fill in the title (or re-run the lookup) before processing.",
+                        "Title needed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
             }
             else // TvShow
             {
@@ -1212,6 +1226,17 @@ namespace MediaRipperEncoder.Forms
                 meta.TvdbSeriesId = _confirmedSeriesId;
                 meta.TitleMappings = BuildTitleMappings();
                 meta.MatchConfirmed = true;
+
+                // Same rule as movies: the show-name box stays editable after confirming, and a
+                // blank would place episodes under "Unknown Show". Refuse loudly instead.
+                if (meta.ShowName.Length == 0)
+                {
+                    MessageBox.Show(this,
+                        "The show name box is empty — episodes would be placed under 'Unknown Show'. " +
+                        "Fill in the show name (or re-run the lookup) before processing.",
+                        "Show name needed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
 
                 if (!meta.TitleMappings.Any(m => m.Include && m.Kind == TitleKind.Episode))
                 {
