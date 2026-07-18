@@ -451,6 +451,12 @@ namespace MediaRipperEncoder.Services.Net
                 error = "Encoded, but tagging/placement threw: " + ex.Message;
             }
 
+            // Refresh the server's own list: EncodeFinisher has just rewritten CurrentOperation
+            // to the real library destination ("Placed -> ..."), but nothing had re-raised the
+            // update, so the row kept showing the staging path it was encoded to.
+            var mirror = JobUpdated;
+            if (mirror != null) { mirror(job); }
+
             // The received staging input is no longer needed once encoded.
             TryDelete(job.InputFile);
 

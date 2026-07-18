@@ -182,7 +182,13 @@ namespace MediaRipperEncoder.Services
             {
                 job.ProgressPercent = 100;
                 job.Status = EncodeStatus.Completed;
-                job.CurrentOperation = "Encoded -> " + job.OutputFile;
+                // Only claim a location the file will actually STAY at. A job with a library
+                // target is about to be moved there, so naming the staging folder here left the
+                // finished row pointing at a scratch path that no longer holds the file — the
+                // placement step overwrites this with the real destination.
+                job.CurrentOperation = string.IsNullOrEmpty(job.FinalTargetPath)
+                    ? "Encoded -> " + job.OutputFile
+                    : "Encoded — placing in library...";
                 Raise(job);
 
                 Action<EncodeJob> handler = JobEncodedSuccessfully;
