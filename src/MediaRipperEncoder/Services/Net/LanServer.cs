@@ -95,11 +95,6 @@ namespace MediaRipperEncoder.Services.Net
         }
 
         /// <summary>
-        /// The live connection for a client name, or null if that client isn't connected right now.
-        /// Job ownership is tracked by NAME so a client that reboots and reconnects picks its
-        /// progress pushes back up on the new connection.
-        /// </summary>
-        /// <summary>
         /// Marks a client as alive right now. The message pump does this automatically, but
         /// during a FILE TRANSFER the pump thread is inside the raw byte read — the host calls
         /// this from the transfer's progress callback so an uploading ripper never looks
@@ -120,6 +115,11 @@ namespace MediaRipperEncoder.Services.Net
             }
         }
 
+        /// <summary>
+        /// The live connection for a client name, or null if that client isn't connected right now.
+        /// Job ownership and the transfer line are keyed by NAME, so a client that reboots and
+        /// reconnects picks its progress pushes and its place in line back up on the new connection.
+        /// </summary>
         public PeerConnection FindClientByName(string name)
         {
             lock (_clientsLock)
@@ -185,13 +185,20 @@ namespace MediaRipperEncoder.Services.Net
             }
         }
 
-        // A healthy client heartbeats every ~10 s when idle and streams bytes when busy, so 90 s
-        // of TOTAL silence means the connection is dead (e.g. a WiFi blip killed it without a
+        // A healthy client heartbeats every ~10 s when idle and streams bytes when busy, so a long
+        // TOTAL silence means the connection is dead (e.g. a router reboot killed it without a
         // FIN — TCP alone would wait forever). The read then throws, the session ends, and the
-        // seat is reclaimed. Writes get a shorter limit so pushing progress to a dead client can
-        // never hang an encode-queue event thread.
-        public const int ClientSilenceTimeoutMs = 90000;
-        private const int ClientSendTimeoutMs = 30000;
+        // seat is reclaimed.
+        //
+        // These windows are DELIBERATELY GENEROUS. While one ripper streams a multi-gigabyte file
+        // over WiFi it can saturate the link, and control traffic to the OTHER connections is
+        // delayed far longer than idle chatter ever would be. A tight limit aborted those healthy
+        // idle sessions ("connection aborted by the software in your host machine"), which churned
+        // the whole fleet. Being slow to reap a truly dead session costs nothing now that the
+        // transfer line is keyed by machine name — a reconnecting ripper reclaims its own seat and
+        // its place in line, so a lingering ghost can no longer block or displace anybody.
+        public const int ClientSilenceTimeoutMs = 300000;
+        private const int ClientSendTimeoutMs = 120000;
 
         private void ServeClient(TcpClient client)
         {

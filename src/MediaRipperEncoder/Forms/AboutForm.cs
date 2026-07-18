@@ -173,7 +173,7 @@ namespace MediaRipperEncoder.Forms
             }
             catch
             {
-                return "0.2.3.3";
+                return "0.2.3.4";
             }
         }
 

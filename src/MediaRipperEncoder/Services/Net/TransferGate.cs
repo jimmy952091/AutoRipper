@@ -13,6 +13,7 @@
  * You should have received a copy of the GNU Affero General Public License along with this program.
  * If not, see <https://www.gnu.org/licenses/>.
  */
+using System;
 using System.Collections.Generic;
 using System.Threading;
 
@@ -24,16 +25,25 @@ namespace MediaRipperEncoder.Services.Net
     /// multi-ripper setup from saturating the server's network/disk with interleaved 5-30 GB
     /// transfers — each rip arrives at full speed, in the order the clients asked.
     ///
-    /// Pure bookkeeping (no sockets), so the grant/queue/disconnect rules are unit-testable.
-    /// "Owner" is an opaque identity for one client connection. All methods are thread-safe and
-    /// return the notifications the caller should deliver — the gate itself never touches the wire.
+    /// OWNERSHIP IS BY MACHINE NAME, NOT BY CONNECTION. A ripper that drops and reconnects gets a
+    /// brand-new socket object, so connection-keyed ownership treated it as a stranger: it was
+    /// appended to the BACK of the line while its old ticket lingered until the server noticed the
+    /// death (up to the silence timeout). With several rippers reconnecting during one long slow
+    /// transfer, the line filled with phantoms and the waiting machines' reported positions only
+    /// ever CLIMBED (observed live: 11 -> 15 while one laptop uploaded over WiFi). Keyed by name,
+    /// a reconnecting machine RECLAIMS its existing place — duplicates are impossible.
+    ///
+    /// Pure bookkeeping (no sockets), so the grant/queue/disconnect rules are unit-testable. All
+    /// methods are thread-safe and return the notifications the caller should deliver — the gate
+    /// itself never touches the wire.
     /// </summary>
     public class TransferGate
     {
         /// <summary>One notification to push to a client: either "go ahead" or "you are Nth in line".</summary>
         public class Notice
         {
-            public object Owner;
+            /// <summary>The client MACHINE NAME this notice is for (resolve to a live connection when sending).</summary>
+            public string Owner;
             public string JobId;
             public bool Granted;
             /// <summary>1-based place in line when not granted (1 = next after the current transfer).</summary>
@@ -42,38 +52,47 @@ namespace MediaRipperEncoder.Services.Net
 
         private class Ticket
         {
-            public object Owner;
+            public string Owner;
             public string JobId;
         }
 
         private readonly object _lock = new object();
         private readonly Queue<Ticket> _waiting = new Queue<Ticket>();
-        private object _holder;
+        private string _holder;
         private string _holderJobId;
 
-        /// <summary>Whether <paramref name="owner"/> currently holds the transfer slot.</summary>
-        public bool IsHolder(object owner)
+        private static bool Same(string a, string b)
         {
-            lock (_lock) { return _holder != null && ReferenceEquals(_holder, owner); }
+            return string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>Whether <paramref name="owner"/> currently holds the transfer slot.</summary>
+        public bool IsHolder(string owner)
+        {
+            lock (_lock) { return _holder != null && Same(_holder, owner); }
+        }
+
+        /// <summary>The machine currently transferring, or null. For the server UI/log.</summary>
+        public string CurrentHolder
+        {
+            get { lock (_lock) { return _holder; } }
         }
 
         /// <summary>
         /// A client asks to send a file. If the slot is free it is granted immediately; otherwise
         /// the client is queued FIFO. The returned notice is for THIS requester.
         ///
-        /// IDEMPOTENT PER OWNER: one connection holds at most ONE place in line. A client that
-        /// re-requests (job resubmitted after a hiccup) UPDATES its existing ticket instead of
-        /// adding another — during a live fleet test, duplicate tickets from reconnect churn made
-        /// a waiting ripper's reported position CLIMB (13, 15, 18...) behind a wall of its own
-        /// and other clients' dead place-holders.
+        /// IDEMPOTENT PER MACHINE: one ripper holds at most ONE place in line, no matter how many
+        /// times it re-asks (job resubmitted after a hiccup, or a whole new connection after a
+        /// reconnect). Re-requesting UPDATES the existing ticket in place rather than adding one.
         /// </summary>
-        public Notice Request(object owner, string jobId)
+        public Notice Request(string owner, string jobId)
         {
             lock (_lock)
             {
-                if (_holder != null && ReferenceEquals(_holder, owner))
+                if (_holder != null && Same(_holder, owner))
                 {
-                    // Already ours (re-request after a resubmit) — refresh the job id, still granted.
+                    // Already ours (re-request after a resubmit/reconnect) — refresh the job id.
                     _holderJobId = jobId;
                     return new Notice { Owner = owner, JobId = jobId, Granted = true };
                 }
@@ -89,7 +108,7 @@ namespace MediaRipperEncoder.Services.Net
                 int position = 1;
                 foreach (Ticket t in _waiting)
                 {
-                    if (ReferenceEquals(t.Owner, owner))
+                    if (Same(t.Owner, owner))
                     {
                         t.JobId = jobId; // same seat in line, newest job id
                         return new Notice { Owner = owner, JobId = jobId, Granted = false, Position = position };
@@ -107,19 +126,26 @@ namespace MediaRipperEncoder.Services.Net
         /// older client that streams FILE_BEGIN without asking first. Its connection thread parks
         /// here and TCP backpressure stalls the sender until it's this client's turn.
         /// </summary>
-        public void WaitUntilHolder(object owner, string jobId)
+        public void WaitUntilHolder(string owner, string jobId)
         {
             lock (_lock)
             {
-                if (ReferenceEquals(_holder, owner)) { return; }
+                if (_holder != null && Same(_holder, owner)) { return; }
                 if (_holder == null)
                 {
                     _holder = owner;
                     _holderJobId = jobId;
                     return;
                 }
-                _waiting.Enqueue(new Ticket { Owner = owner, JobId = jobId });
-                while (!ReferenceEquals(_holder, owner))
+                // Take (or refresh) a single place in line, then wait for it to come up.
+                bool queued = false;
+                foreach (Ticket t in _waiting)
+                {
+                    if (Same(t.Owner, owner)) { t.JobId = jobId; queued = true; break; }
+                }
+                if (!queued) { _waiting.Enqueue(new Ticket { Owner = owner, JobId = jobId }); }
+
+                while (_holder == null || !Same(_holder, owner))
                 {
                     Monitor.Wait(_lock);
                 }
@@ -131,11 +157,11 @@ namespace MediaRipperEncoder.Services.Net
         /// line; everyone still waiting gets a refreshed position. Returns the notices to deliver
         /// (possibly empty). A release by a non-holder is ignored (defensive).
         /// </summary>
-        public List<Notice> Release(object owner)
+        public List<Notice> Release(string owner)
         {
             lock (_lock)
             {
-                if (_holder == null || !ReferenceEquals(_holder, owner)) { return new List<Notice>(); }
+                if (_holder == null || !Same(_holder, owner)) { return new List<Notice>(); }
                 _holder = null;
                 _holderJobId = null;
                 return PromoteNextLocked();
@@ -143,24 +169,26 @@ namespace MediaRipperEncoder.Services.Net
         }
 
         /// <summary>
-        /// A client disconnected: drop all its tickets, and if it held the slot, pass the slot on.
+        /// A client is gone for good: drop its ticket, and if it held the slot, pass the slot on.
+        /// Callers should NOT call this for a machine that has already reconnected under the same
+        /// name — by design that machine keeps its place in line.
         /// Returns the notices to deliver to the remaining clients.
         /// </summary>
-        public List<Notice> RemoveOwner(object owner)
+        public List<Notice> RemoveOwner(string owner)
         {
             lock (_lock)
             {
-                // Rebuild the line without the departed client's tickets, preserving order.
+                // Rebuild the line without the departed client's ticket, preserving order.
                 var keep = new List<Ticket>();
                 foreach (Ticket t in _waiting)
                 {
-                    if (!ReferenceEquals(t.Owner, owner)) { keep.Add(t); }
+                    if (!Same(t.Owner, owner)) { keep.Add(t); }
                 }
                 bool lineChanged = keep.Count != _waiting.Count;
                 _waiting.Clear();
                 foreach (Ticket t in keep) { _waiting.Enqueue(t); }
 
-                if (_holder != null && ReferenceEquals(_holder, owner))
+                if (_holder != null && Same(_holder, owner))
                 {
                     _holder = null;
                     _holderJobId = null;

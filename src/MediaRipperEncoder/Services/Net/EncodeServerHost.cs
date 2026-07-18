@@ -135,8 +135,19 @@ namespace MediaRipperEncoder.Services.Net
             }
             Logger.Info("EncodeServerHost: ripper '" + name + "' disconnected; queued/running encodes continue.");
 
-            // If it held the transfer slot or a place in line, hand the slot on / close the gap.
-            DeliverGateNotices(_gate.RemoveOwner(conn));
+            // Surrender its place in the transfer line ONLY if the machine is really gone. If it
+            // has already reconnected under the same name (the common case during a flaky link),
+            // that new session inherits the place — otherwise the reconnect would go to the back
+            // of the line while this stale cleanup fired, which is how phantom tickets used to
+            // pile up and push everyone's position UP.
+            if (_server.FindClientByName(name) == null)
+            {
+                DeliverGateNotices(_gate.RemoveOwner(name));
+            }
+            else
+            {
+                Logger.Info("EncodeServerHost: '" + name + "' already reconnected; it keeps its place in the transfer line.");
+            }
             RaiseClientsChanged();
         }
 
@@ -223,7 +234,7 @@ namespace MediaRipperEncoder.Services.Net
         private void HandleSendRequest(NetMessage msg, PeerConnection conn)
         {
             string jobId = msg.GetString("jobId");
-            TransferGate.Notice notice = _gate.Request(conn, jobId);
+            TransferGate.Notice notice = _gate.Request(NameOf(conn), jobId);
             DeliverGateNotices(new List<TransferGate.Notice> { notice });
             if (!notice.Granted)
             {
@@ -247,11 +258,11 @@ namespace MediaRipperEncoder.Services.Net
             // COMPATIBILITY: an older client streams FILE_BEGIN without SEND_REQUEST. Park its
             // connection thread until the slot frees — TCP backpressure stalls the sender, so the
             // one-transfer-at-a-time rule holds for old clients too (just without the nice status).
-            if (!_gate.IsHolder(conn))
+            if (!_gate.IsHolder(NameOf(conn)))
             {
                 Logger.Info("EncodeServerHost: FILE_BEGIN from '" + NameOf(conn) +
                             "' without a granted slot (older client?); serializing via backpressure.");
-                _gate.WaitUntilHolder(conn, request != null ? request.ClientJobId : "");
+                _gate.WaitUntilHolder(NameOf(conn), request != null ? request.ClientJobId : "");
             }
 
             try
@@ -323,7 +334,7 @@ namespace MediaRipperEncoder.Services.Net
             finally
             {
                 // Success or failure, this transfer is over — pass the slot to the next ripper in line.
-                DeliverGateNotices(_gate.Release(conn));
+                DeliverGateNotices(_gate.Release(NameOf(conn)));
             }
         }
 
@@ -334,8 +345,18 @@ namespace MediaRipperEncoder.Services.Net
             while (pending.Count > 0)
             {
                 TransferGate.Notice n = pending.Dequeue();
-                var target = n.Owner as PeerConnection;
-                if (target == null) { continue; }
+                // Resolve the machine name to its CURRENT live connection — a notice may be
+                // delivered after that ripper reconnected on a fresh socket.
+                PeerConnection target = _server.FindClientByName(n.Owner);
+                if (target == null)
+                {
+                    if (n.Granted)
+                    {
+                        Logger.Info("EncodeServerHost: '" + n.Owner + "' holds the transfer slot but is " +
+                                    "offline right now; it keeps its turn until it reconnects or is reaped.");
+                    }
+                    continue;
+                }
                 try
                 {
                     target.Write(n.Granted

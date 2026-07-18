@@ -50,9 +50,10 @@ namespace MediaRipperEncoder.Services.Net
         private readonly object _outboxLock = new object();
         private readonly AutoResetEvent _wake = new AutoResetEvent(false);
 
-        // Socket write limits: fail fast on control chatter, tolerate encoding-induced server
-        // disk stalls during bulk file streaming (see SendOneJob).
-        private const int ControlSendTimeoutMs = 30000;
+        // Socket write limits. Both are generous: while ANOTHER ripper is streaming a large file
+        // the LAN can be saturated, so even a tiny heartbeat write may stall for a long time —
+        // a tight limit aborted the socket (WSAECONNABORTED) and dropped healthy waiting rippers.
+        private const int ControlSendTimeoutMs = 120000;
         private const int BulkSendTimeoutMs = 1800000;
 
         private Thread _sessionThread;
