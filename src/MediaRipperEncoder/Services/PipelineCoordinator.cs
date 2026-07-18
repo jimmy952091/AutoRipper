@@ -81,7 +81,7 @@ namespace MediaRipperEncoder.Services
             _ripQueue = new RipQueue(_makeMkv);
 
             _handBrake = new HandBrakeService(settings.HandBrakeCliPath, settings.HandBrakePresetPath);
-            _encodeQueue = new EncodeQueue(_handBrake);
+            _encodeQueue = new EncodeQueue(_handBrake, "local");
 
             _planner = EncodeJobPlanner.FromSettings(settings);
 
@@ -108,6 +108,16 @@ namespace MediaRipperEncoder.Services
                 Logger.Info("PipelineCoordinator: RipperClient mode — encoding offloaded to " +
                             settings.NodeServerHost + ":" + settings.NodePort + ".");
             }
+        }
+
+        /// <summary>
+        /// Re-queues encodes left unfinished by the previous session (an update, a crash, a
+        /// Windows-update reboot). Call this AFTER subscribing to <see cref="EncodeJobUpdated"/>
+        /// so recovered jobs appear in the UI list. Returns how many were resumed.
+        /// </summary>
+        public int ResumePersistedEncodes()
+        {
+            return _encodeQueue.ResumePersisted();
         }
 
         /// <summary>Exposed so the UI can run a disc scan through the same MakeMKV service.</summary>

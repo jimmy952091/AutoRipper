@@ -95,6 +95,15 @@ namespace MediaRipperEncoder.Forms
             UpdateProviderModeLabel();
             ConfigureForNodeRole();
 
+            // Pick up encodes the last session didn't finish (update installed, crash, reboot).
+            // Done AFTER the event wiring above so recovered jobs show up in the encode list.
+            int resumed = _pipeline.ResumePersistedEncodes();
+            if (resumed > 0)
+            {
+                SetStatus("Resumed " + resumed + " unfinished encode(s) from your last session — " +
+                          "nothing needs re-ripping.", false);
+            }
+
             Load += (s, e) => RefreshDrives(selectLetter: _settings.LastUsedDrive);
             FormClosed += (s, e) =>
             {

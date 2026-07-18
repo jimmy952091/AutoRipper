@@ -78,7 +78,7 @@ namespace MediaRipperEncoder.Services.Net
             _settings = settings;
 
             _handBrake = new HandBrakeService(settings.HandBrakeCliPath, settings.HandBrakePresetPath);
-            _encodeQueue = new EncodeQueue(_handBrake);
+            _encodeQueue = new EncodeQueue(_handBrake, "server");
             _planner = EncodeJobPlanner.FromSettings(settings);
 
             // All received files land under here and ONLY here.
@@ -99,6 +99,15 @@ namespace MediaRipperEncoder.Services.Net
         public void Start()
         {
             Directory.CreateDirectory(_stagingRoot);
+
+            // Re-queue anything this server was still encoding when it last closed. The received
+            // files are already in the staging inbox, so nothing has to be re-ripped or re-sent.
+            int resumed = _encodeQueue.ResumePersisted();
+            if (resumed > 0)
+            {
+                Logger.Info("EncodeServerHost: resumed " + resumed + " unfinished encode(s) from the previous session.");
+            }
+
             _server.Start(_settings.NodePort);
             Logger.Info("EncodeServerHost: ready to receive encode jobs from up to " +
                         _server.MaxClients + " ripper(s) (staging: " + _stagingRoot + ").");

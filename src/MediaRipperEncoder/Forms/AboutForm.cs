@@ -168,12 +168,15 @@ namespace MediaRipperEncoder.Forms
                 Version v = Assembly.GetExecutingAssembly().GetName().Version;
                 // Three parts normally (0.2.3); include the fourth only when it's a hotfix
                 // revision (0.2.3.1) — otherwise About couldn't distinguish a hotfix build.
+                // Hotfix revisions are shown ZERO-PADDED to two digits (0.2.4.01) so they sort
+                // and read unambiguously up to .99. Windows stores it as a plain integer, so
+                // 0.2.4.1 and 0.2.4.01 are the same build — the padding is presentation only.
                 string text = v.Major + "." + v.Minor + "." + Math.Max(v.Build, 0);
-                return v.Revision > 0 ? text + "." + v.Revision : text;
+                return v.Revision > 0 ? text + "." + v.Revision.ToString("00") : text;
             }
             catch
             {
-                return "0.2.4";
+                return "0.2.4.01";
             }
         }
 

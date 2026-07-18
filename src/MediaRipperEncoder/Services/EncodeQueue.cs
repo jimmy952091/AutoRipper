@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
@@ -37,10 +38,56 @@ namespace MediaRipperEncoder.Services
         /// </summary>
         public event Action<EncodeJob> JobEncodedSuccessfully;
 
-        public EncodeQueue(HandBrakeService handBrake)
+        // Unfinished work, mirrored to disk so an unexpected exit (Windows update reboot, power
+        // cut, or installing an update) never strands encodes. Null role = no persistence, which
+        // is what test harnesses use.
+        private readonly string _persistRole;
+        private readonly List<EncodeJob> _unfinished = new List<EncodeJob>();
+        private readonly object _unfinishedLock = new object();
+
+        public EncodeQueue(HandBrakeService handBrake) : this(handBrake, null)
+        {
+        }
+
+        /// <summary>
+        /// Creates a queue that REMEMBERS its unfinished jobs under <paramref name="persistRole"/>
+        /// ("local" for the standalone/ripper pipeline, "server" for an encoder-server node — they
+        /// keep separate files so a server node's two queues can't overwrite each other).
+        /// Call <see cref="ResumePersisted"/> once the caller has wired up its events.
+        /// </summary>
+        public EncodeQueue(HandBrakeService handBrake, string persistRole)
         {
             _handBrake = handBrake;
+            _persistRole = persistRole;
             _worker = Task.Factory.StartNew(ProcessLoop, TaskCreationOptions.LongRunning);
+        }
+
+        /// <summary>
+        /// Re-queues the unfinished encodes saved by the previous session. Call AFTER subscribing
+        /// to <see cref="JobUpdated"/> so the recovered jobs appear in the UI. Returns how many
+        /// were resumed. No-op for a non-persisting queue.
+        /// </summary>
+        public int ResumePersisted()
+        {
+            if (string.IsNullOrEmpty(_persistRole)) { return 0; }
+
+            List<EncodeJob> recovered = EncodeQueueStore.Load(_persistRole);
+            foreach (EncodeJob job in recovered) { Enqueue(job); }
+            if (recovered.Count > 0)
+            {
+                Logger.Info("Encode queue (" + _persistRole + "): re-queued " + recovered.Count +
+                            " encode(s) recovered from the previous session.");
+            }
+            return recovered.Count;
+        }
+
+        /// <summary>Writes the still-unfinished jobs to disk. Best-effort; never throws.</summary>
+        private void PersistUnfinished()
+        {
+            if (string.IsNullOrEmpty(_persistRole)) { return; }
+            List<EncodeJob> snapshot;
+            lock (_unfinishedLock) { snapshot = new List<EncodeJob>(_unfinished); }
+            EncodeQueueStore.Save(_persistRole, snapshot);
         }
 
         /// <summary>Appends a job to the back of the queue (FIFO).</summary>
@@ -49,6 +96,13 @@ namespace MediaRipperEncoder.Services
             job.Status = EncodeStatus.Queued;
             job.ProgressPercent = 0;
             job.CurrentOperation = "Queued";
+
+            lock (_unfinishedLock)
+            {
+                if (!_unfinished.Contains(job)) { _unfinished.Add(job); }
+            }
+            PersistUnfinished();
+
             Raise(job);
             _queue.Add(job);
             Logger.Info("Encode job " + job.ShortId + " queued: " + job.InputFile);
@@ -117,6 +171,12 @@ namespace MediaRipperEncoder.Services
                         Raise(job);
                     },
                     _currentJobCancel.Token);
+
+            // Terminal either way: this job is no longer work we owe, so drop it from the
+            // saved queue before announcing it (a crash during placement must not resurrect an
+            // encode that already finished).
+            lock (_unfinishedLock) { _unfinished.Remove(job); }
+            PersistUnfinished();
 
             if (outcome.Success)
             {
