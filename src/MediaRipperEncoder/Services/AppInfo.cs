@@ -45,6 +45,17 @@ namespace MediaRipperEncoder.Services
         }
 
         /// <summary>
+        /// Full path to the pending-transfer outbox. A RipperClient records here every ripped file
+        /// it still owes the encoder server, so closing the app (to install an update, say) never
+        /// strands finished rips — they are picked back up on the next launch instead of having to
+        /// be ripped all over again.
+        /// </summary>
+        public static string OutboxFilePath
+        {
+            get { return Path.Combine(AppDataFolder, "outbox.json"); }
+        }
+
+        /// <summary>
         /// Makes sure the AppData folder exists. Safe to call repeatedly; does nothing
         /// if it's already there.
         /// </summary>

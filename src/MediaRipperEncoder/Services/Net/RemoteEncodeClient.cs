@@ -96,6 +96,24 @@ namespace MediaRipperEncoder.Services.Net
         {
             if (_running) { return; }
             _running = true;
+
+            // Resume anything the last session still owed the server. Without this, closing the
+            // app (to install an update, say) stranded finished rips: the files were on disk but
+            // the app had forgotten them AND their confirmed metadata, so the disc had to be
+            // ripped again. Entries whose file has since vanished are dropped by the store.
+            List<OutboxEntry> resumed = OutboxStore.Load();
+            if (resumed.Count > 0)
+            {
+                lock (_outboxLock)
+                {
+                    foreach (OutboxEntry entry in resumed)
+                    {
+                        _outbox.Enqueue(new PendingSubmit { Request = entry.Request, FilePath = entry.FilePath });
+                    }
+                }
+                PersistOutbox(); // rewrite without any dropped-file entries
+            }
+
             _sessionThread = new Thread(SessionLoop) { IsBackground = true, Name = "RemoteEncode-Session" };
             _sessionThread.Start();
         }
@@ -114,7 +132,25 @@ namespace MediaRipperEncoder.Services.Net
             {
                 _outbox.Enqueue(new PendingSubmit { Request = request, FilePath = filePath });
             }
+            PersistOutbox();
             _wake.Set();
+        }
+
+        /// <summary>
+        /// Writes the current queue to disk so it survives the app closing. Cheap (a few KB) and
+        /// best-effort — a failure here is logged but never disturbs an in-flight transfer.
+        /// </summary>
+        private void PersistOutbox()
+        {
+            var snapshot = new List<OutboxEntry>();
+            lock (_outboxLock)
+            {
+                foreach (PendingSubmit p in _outbox)
+                {
+                    snapshot.Add(new OutboxEntry { Request = p.Request, FilePath = p.FilePath });
+                }
+            }
+            OutboxStore.Save(snapshot);
         }
 
         /// <summary>Number of jobs still waiting to be transferred to the server.</summary>
@@ -185,8 +221,10 @@ namespace MediaRipperEncoder.Services.Net
                 {
                     SendOneJob(client, next);
                     // Only now that the file is fully transferred is the job the server's
-                    // responsibility — remove it from the outbox.
+                    // responsibility — remove it from the outbox (and from the saved copy, so a
+                    // restart doesn't re-send a file the server already has).
                     lock (_outboxLock) { _outbox.Dequeue(); }
+                    PersistOutbox();
                     continue;
                 }
 
