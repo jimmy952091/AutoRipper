@@ -50,6 +50,11 @@ namespace MediaRipperEncoder.Services.Net
         private readonly object _outboxLock = new object();
         private readonly AutoResetEvent _wake = new AutoResetEvent(false);
 
+        // Socket write limits: fail fast on control chatter, tolerate encoding-induced server
+        // disk stalls during bulk file streaming (see SendOneJob).
+        private const int ControlSendTimeoutMs = 30000;
+        private const int BulkSendTimeoutMs = 300000;
+
         private Thread _sessionThread;
         private volatile bool _running;
         private volatile bool _connected;
@@ -275,10 +280,22 @@ namespace MediaRipperEncoder.Services.Net
 
             // Stream the file. If this throws (link died mid-transfer), the job stays at the head
             // of the outbox and is re-sent whole on reconnect; the server's SHA-256 check makes a
-            // truncated first attempt harmless.
+            // truncated first attempt harmless. The bulk stream gets a 5-minute stall tolerance:
+            // the server's disk is often busy ENCODING while receiving, and its receive rate can
+            // legally stall far past the 30 s control-message limit — which aborted healthy
+            // transfers gigabytes in and churned the whole fleet's queue.
+            Logger.Info("RemoteEncodeClient: transfer slot granted — streaming " + pending.FilePath + ".");
             var up = UploadProgress;
-            FileTransfer.SendFile(client.Connection, pending.FilePath, pending.Request.SourceFileName,
-                (sent, total) => { if (up != null) { up(jobId, sent, total); } });
+            client.SetSendTimeout(BulkSendTimeoutMs);
+            try
+            {
+                FileTransfer.SendFile(client.Connection, pending.FilePath, pending.Request.SourceFileName,
+                    (sent, total) => { if (up != null) { up(jobId, sent, total); } });
+            }
+            finally
+            {
+                client.SetSendTimeout(ControlSendTimeoutMs);
+            }
         }
 
         /// <summary>

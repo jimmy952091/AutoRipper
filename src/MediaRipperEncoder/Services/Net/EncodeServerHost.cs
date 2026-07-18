@@ -316,8 +316,10 @@ namespace MediaRipperEncoder.Services.Net
         /// <summary>Pushes gate decisions (go-ahead / new position) to the clients they belong to.</summary>
         private void DeliverGateNotices(List<TransferGate.Notice> notices)
         {
-            foreach (TransferGate.Notice n in notices)
+            var pending = new Queue<TransferGate.Notice>(notices);
+            while (pending.Count > 0)
             {
+                TransferGate.Notice n = pending.Dequeue();
                 var target = n.Owner as PeerConnection;
                 if (target == null) { continue; }
                 try
@@ -328,8 +330,18 @@ namespace MediaRipperEncoder.Services.Net
                 }
                 catch (Exception ex)
                 {
-                    // The peer may be mid-disconnect; its RemoveOwner cleanup re-passes the slot.
                     Logger.Info("EncodeServerHost: gate notice push failed (" + ex.Message + ").");
+                    if (n.Granted)
+                    {
+                        // An undeliverable GRANT means the slot went to a dead connection — the
+                        // whole line would sit frozen until disconnect detection catches up.
+                        // Evict that owner NOW and pass the slot on immediately.
+                        Logger.Info("EncodeServerHost: granted client unreachable — passing the transfer slot on.");
+                        foreach (TransferGate.Notice next in _gate.RemoveOwner(n.Owner))
+                        {
+                            pending.Enqueue(next);
+                        }
+                    }
                 }
             }
         }

@@ -141,6 +141,19 @@ namespace MediaRipperEncoder.Services.Net
             }
         }
 
+        /// <summary>
+        /// Adjusts the socket write timeout. Control messages keep a tight limit (a dead link
+        /// should fail fast), but BULK FILE STREAMING must tolerate long stalls: while the server
+        /// is encoding, its disk is saturated and its receive rate can stall well past 30 s —
+        /// a tight limit there ABORTED healthy multi-gigabyte transfers mid-file (seen live:
+        /// 6m44s into a movie upload, "connection aborted by the software in your host machine").
+        /// </summary>
+        public void SetSendTimeout(int milliseconds)
+        {
+            try { if (_tcp != null) { _tcp.SendTimeout = milliseconds; } }
+            catch { /* socket already closed — the session is ending anyway */ }
+        }
+
         /// <summary>Sends a message to the server.</summary>
         public void Send(NetMessage message)
         {
