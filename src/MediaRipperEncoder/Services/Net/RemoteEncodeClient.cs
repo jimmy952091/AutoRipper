@@ -53,7 +53,7 @@ namespace MediaRipperEncoder.Services.Net
         // Socket write limits: fail fast on control chatter, tolerate encoding-induced server
         // disk stalls during bulk file streaming (see SendOneJob).
         private const int ControlSendTimeoutMs = 30000;
-        private const int BulkSendTimeoutMs = 300000;
+        private const int BulkSendTimeoutMs = 1800000;
 
         private Thread _sessionThread;
         private volatile bool _running;

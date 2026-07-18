@@ -40,6 +40,9 @@ namespace MediaRipperEncoder.Services.Net
         private readonly string _stagingRoot;
         private readonly TransferGate _gate = new TransferGate();
 
+        /// <summary>Read-stall tolerance while receiving a file (user-requested: slow systems).</summary>
+        private const int BulkReceiveTimeoutMs = 1800000;
+
         // Per-connection FIFO of jobs whose JOB_SUBMIT arrived but whose file hasn't. Each client's
         // own protocol is serial (submit -> send -> submit -> send), so matching its next FILE_BEGIN
         // to the head of ITS queue is exact — and one client's jobs can never pair with another's file.
@@ -269,8 +272,19 @@ namespace MediaRipperEncoder.Services.Net
                 // The progress callback marks the uploader ALIVE throughout the transfer — its
                 // message pump is busy with raw bytes, so without this a long upload would look
                 // like silence and the client could be displaced by a same-name connection.
-                bool ok = FileTransfer.ReceiveFile(conn, msg, dest,
-                    (done, total) => _server.MarkActivity(conn));
+                // 30-minute stall tolerance for the bulk receive (slow WiFi rippers), then back
+                // to the tight idle limit for heartbeat-covered control traffic.
+                conn.SetReceiveTimeout(BulkReceiveTimeoutMs);
+                bool ok;
+                try
+                {
+                    ok = FileTransfer.ReceiveFile(conn, msg, dest,
+                        (done, total) => _server.MarkActivity(conn));
+                }
+                finally
+                {
+                    conn.SetReceiveTimeout(LanServer.ClientSilenceTimeoutMs);
+                }
                 if (!ok)
                 {
                     conn.Write(new NetMessage(MsgType.JobDone)

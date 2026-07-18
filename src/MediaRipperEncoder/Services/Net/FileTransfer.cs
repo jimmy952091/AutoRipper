@@ -35,14 +35,19 @@ namespace MediaRipperEncoder.Services.Net
         {
             var info = new FileInfo(filePath);
             long size = info.Length;
-            string hash = ComputeSha256(filePath);
 
+            // SINGLE PASS: hash WHILE streaming, checksum delivered in a trailing FILE_END.
+            // Pre-hashing the whole file first left the connection SILENT for however long the
+            // hash took — on a slow laptop disk that exceeded the server's 90 s silence timeout,
+            // so its transfers were killed before the first byte ever left (seen live: session
+            // ended exactly 90 s after the grant). Now bytes flow immediately.
             conn.Write(new NetMessage(MsgType.FileBegin)
                 .With("name", logicalName ?? Path.GetFileName(filePath))
-                .With("size", size)
-                .With("sha256", hash));
+                .With("size", size));
 
+            string hash;
             Stream raw = conn.RawStream;
+            using (var sha = SHA256.Create())
             using (FileStream fs = File.OpenRead(filePath))
             {
                 byte[] buffer = new byte[ChunkSize];
@@ -51,11 +56,15 @@ namespace MediaRipperEncoder.Services.Net
                 while ((read = fs.Read(buffer, 0, buffer.Length)) > 0)
                 {
                     raw.Write(buffer, 0, read);
+                    sha.TransformBlock(buffer, 0, read, null, 0);
                     sent += read;
                     if (onProgress != null) { onProgress(sent, size); }
                 }
+                sha.TransformFinalBlock(new byte[0], 0, 0);
+                hash = ToHex(sha.Hash);
                 raw.Flush();
             }
+            conn.Write(new NetMessage(MsgType.FileEnd).With("sha256", hash));
 
             Logger.Info("FileTransfer: sent '" + logicalName + "' (" + size + " bytes, sha256 " +
                         hash.Substring(0, 8) + "...).");
@@ -71,6 +80,9 @@ namespace MediaRipperEncoder.Services.Net
             Action<long, long> onProgress = null)
         {
             long size = fileBegin.GetLong("size");
+            // Current senders deliver the checksum in a trailing FILE_END (hash-while-streaming);
+            // a pre-0.2.3.3 sender put it in FILE_BEGIN. Support both so a mixed fleet fails
+            // loudly at the checksum, not confusingly at the framing.
             string expected = fileBegin.GetString("sha256");
 
             string dir = Path.GetDirectoryName(destPath);
@@ -100,6 +112,16 @@ namespace MediaRipperEncoder.Services.Net
                         if (onProgress != null) { onProgress(size - remaining, size); }
                     }
                     sha.TransformFinalBlock(new byte[0], 0, 0);
+
+                    if (string.IsNullOrEmpty(expected))
+                    {
+                        NetMessage fileEnd = conn.Read();
+                        if (fileEnd == null || fileEnd.Type != MsgType.FileEnd)
+                        {
+                            throw new IOException("Expected FILE_END with the checksum after the file bytes.");
+                        }
+                        expected = fileEnd.GetString("sha256");
+                    }
 
                     string actual = ToHex(sha.Hash);
                     ok = string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase);

@@ -190,7 +190,7 @@ namespace MediaRipperEncoder.Services.Net
         // FIN — TCP alone would wait forever). The read then throws, the session ends, and the
         // seat is reclaimed. Writes get a shorter limit so pushing progress to a dead client can
         // never hang an encode-queue event thread.
-        private const int ClientSilenceTimeoutMs = 90000;
+        public const int ClientSilenceTimeoutMs = 90000;
         private const int ClientSendTimeoutMs = 30000;
 
         private void ServeClient(TcpClient client)

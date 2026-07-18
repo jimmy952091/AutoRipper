@@ -32,9 +32,9 @@ $publish = $staging
     -arch x64 `
     -d "PublishDir=$publish" `
     -d "SrcDir=$(Join-Path $root 'src\MediaRipperEncoder')" `
-    -o (Join-Path $out "AutoRipper-0.2.3.2-x64.msi")
+    -o (Join-Path $out "AutoRipper-0.2.3.3-x64.msi")
 if ($LASTEXITCODE -ne 0) { throw "MSI build failed." }
 
-Write-Host "MSI written to $out\AutoRipper-0.2.3.2-x64.msi"
-Write-Host "Silent install:   msiexec /i AutoRipper-0.2.3.2-x64.msi /qn"
-Write-Host "Silent uninstall: msiexec /x AutoRipper-0.2.3.2-x64.msi /qn"
+Write-Host "MSI written to $out\AutoRipper-0.2.3.3-x64.msi"
+Write-Host "Silent install:   msiexec /i AutoRipper-0.2.3.3-x64.msi /qn"
+Write-Host "Silent uninstall: msiexec /x AutoRipper-0.2.3.3-x64.msi /qn"

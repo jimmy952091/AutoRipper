@@ -37,6 +37,17 @@ namespace MediaRipperEncoder.Services.Net
             }
         }
 
+        /// <summary>
+        /// Adjusts the socket read timeout. The server keeps a tight idle limit (dead sessions
+        /// must be reaped) but raises it hugely around a bulk file receive — a slow sender's WiFi
+        /// may legally stall far longer than idle heartbeat silence ever could.
+        /// </summary>
+        public void SetReceiveTimeout(int milliseconds)
+        {
+            try { _client.ReceiveTimeout = milliseconds; }
+            catch { /* socket closing — session is ending anyway */ }
+        }
+
         /// <summary>The raw stream, for streaming file bytes outside the message framing (later phase).</summary>
         public Stream RawStream { get { return _stream; } }
 
