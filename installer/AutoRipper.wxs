@@ -17,7 +17,7 @@
        or upgrades will install side-by-side instead of replacing. -->
   <Package Name="AutoRipper"
            Manufacturer="James Spurgeon"
-           Version="0.2.3"
+           Version="0.2.3.1"
            UpgradeCode="6E1B9A47-3C52-4B7A-9D8E-2F0A61C4D513"
            Language="1033"
            Scope="perMachine"
@@ -25,7 +25,12 @@
 
     <SummaryInformation Description="AutoRipper — automated disc ripping and encoding for Plex, Jellyfin, and other media servers." />
 
-    <MajorUpgrade DowngradeErrorMessage="A newer version of AutoRipper is already installed." />
+    <!-- AllowSameVersionUpgrades: Windows Installer compares only the FIRST THREE version
+         fields, so a hotfix like 0.2.3.1 looks identical to 0.2.3 and would otherwise refuse
+         to upgrade it. With this on, same-x.y.z installs replace each other (which also means
+         an old x.y.z MSI can replace a newer x.y.z.n — always install the newest). -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version of AutoRipper is already installed."
+                  AllowSameVersionUpgrades="yes" />
     <MediaTemplate EmbedCab="yes" />
 
     <!-- App icon shown in Add/Remove Programs. Shortcuts get the exe's own embedded icon. -->

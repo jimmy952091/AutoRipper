@@ -166,12 +166,14 @@ namespace MediaRipperEncoder.Forms
             try
             {
                 Version v = Assembly.GetExecutingAssembly().GetName().Version;
-                // Show the meaningful three parts (e.g. 0.1.0), not the trailing revision.
-                return v.Major + "." + v.Minor + "." + v.Build;
+                // Three parts normally (0.2.3); include the fourth only when it's a hotfix
+                // revision (0.2.3.1) — otherwise About couldn't distinguish a hotfix build.
+                string text = v.Major + "." + v.Minor + "." + Math.Max(v.Build, 0);
+                return v.Revision > 0 ? text + "." + v.Revision : text;
             }
             catch
             {
-                return "0.2.3";
+                return "0.2.3.1";
             }
         }
 

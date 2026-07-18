@@ -60,17 +60,41 @@ namespace MediaRipperEncoder.Services.Net
         /// <summary>
         /// A client asks to send a file. If the slot is free it is granted immediately; otherwise
         /// the client is queued FIFO. The returned notice is for THIS requester.
+        ///
+        /// IDEMPOTENT PER OWNER: one connection holds at most ONE place in line. A client that
+        /// re-requests (job resubmitted after a hiccup) UPDATES its existing ticket instead of
+        /// adding another — during a live fleet test, duplicate tickets from reconnect churn made
+        /// a waiting ripper's reported position CLIMB (13, 15, 18...) behind a wall of its own
+        /// and other clients' dead place-holders.
         /// </summary>
         public Notice Request(object owner, string jobId)
         {
             lock (_lock)
             {
+                if (_holder != null && ReferenceEquals(_holder, owner))
+                {
+                    // Already ours (re-request after a resubmit) — refresh the job id, still granted.
+                    _holderJobId = jobId;
+                    return new Notice { Owner = owner, JobId = jobId, Granted = true };
+                }
+
                 if (_holder == null)
                 {
                     _holder = owner;
                     _holderJobId = jobId;
                     Monitor.PulseAll(_lock);
                     return new Notice { Owner = owner, JobId = jobId, Granted = true };
+                }
+
+                int position = 1;
+                foreach (Ticket t in _waiting)
+                {
+                    if (ReferenceEquals(t.Owner, owner))
+                    {
+                        t.JobId = jobId; // same seat in line, newest job id
+                        return new Notice { Owner = owner, JobId = jobId, Granted = false, Position = position };
+                    }
+                    position++;
                 }
 
                 _waiting.Enqueue(new Ticket { Owner = owner, JobId = jobId });

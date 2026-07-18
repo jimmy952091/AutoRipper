@@ -246,7 +246,15 @@ namespace MediaRipperEncoder.Services.Net
                 {
                     NetMessage msg = ReceiveKeepingLinkAlive(client);
                     if (msg == null) { throw new System.IO.IOException("Connection lost awaiting the transfer slot."); }
-                    if (msg.Type == MsgType.SendGrant) { granted = true; }
+                    if (msg.Type == MsgType.SendGrant)
+                    {
+                        // The grant must be for THIS job. A stale grant from a previous session's
+                        // request must not trigger a premature FILE_BEGIN — that sent bytes the
+                        // server wasn't reading, stalled to the send timeout, and reconnect-churned
+                        // the whole fleet's transfer line.
+                        if (msg.GetString("jobId") == jobId) { granted = true; }
+                        else { Logger.Info("RemoteEncodeClient: ignoring stale transfer grant for job " + msg.GetString("jobId") + "."); }
+                    }
                     else if (msg.Type == MsgType.SendWait && msg.GetString("jobId") == jobId)
                     {
                         int position = msg.GetInt("position");
