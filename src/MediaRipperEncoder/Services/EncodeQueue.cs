@@ -172,11 +172,25 @@ namespace MediaRipperEncoder.Services
                     },
                     _currentJobCancel.Token);
 
-            // Terminal either way: this job is no longer work we owe, so drop it from the
-            // saved queue before announcing it (a crash during placement must not resurrect an
-            // encode that already finished).
-            lock (_unfinishedLock) { _unfinished.Remove(job); }
-            PersistUnfinished();
+            // Drop the job from the saved queue now that it's finished — EXCEPT when it was
+            // killed by the app SHUTTING DOWN. Closing the app cancels the running encode, which
+            // arrives here looking like an ordinary failure; removing it then deleted the very
+            // job the user most wanted back (seen live: a movie 93% encoded vanished from the
+            // queue while everything merely waiting behind it survived). An interrupted encode is
+            // unfinished work, so it stays saved and restarts next launch. A user-requested
+            // cancel is genuinely terminal — they chose to stop it — and _shutdown tells the two
+            // apart, since CancelCurrent only cancels the per-job token.
+            bool interruptedByShutdown = !outcome.Success && _shutdown.IsCancellationRequested;
+            if (interruptedByShutdown)
+            {
+                Logger.Info("Encode job " + job.ShortId + " was interrupted by shutdown — keeping it " +
+                            "queued so it restarts next launch.");
+            }
+            else
+            {
+                lock (_unfinishedLock) { _unfinished.Remove(job); }
+                PersistUnfinished();
+            }
 
             if (outcome.Success)
             {
