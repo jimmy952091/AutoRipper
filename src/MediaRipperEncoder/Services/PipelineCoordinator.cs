@@ -117,7 +117,39 @@ namespace MediaRipperEncoder.Services
         /// </summary>
         public int ResumePersistedEncodes()
         {
-            return _encodeQueue.ResumePersisted();
+            int count = _encodeQueue.ResumePersisted();
+            if (_remote == null) { return count; }
+
+            // RipperClient: also resume uploads we still owe the server, and REBUILD their rows in
+            // the encode list. Without the rows a recovered upload runs invisibly, which looks
+            // exactly like the queue was lost — the bug this method exists to prevent.
+            foreach (Services.Net.OutboxEntry entry in _remote.ResumePersisted())
+            {
+                if (entry == null || entry.Request == null) { continue; }
+
+                string displayName = entry.Request.SourceFileName ?? "";
+                try
+                {
+                    LibraryTarget target = _planner.BuildTargetFor(entry.Request.Metadata, entry.Request.TitleIndex);
+                    if (target != null && !string.IsNullOrEmpty(target.FileName)) { displayName = target.FileName; }
+                }
+                catch { /* fall back to the source file name */ }
+
+                var shadow = new EncodeJob
+                {
+                    InputFile = entry.FilePath,
+                    DisplayName = displayName,
+                    TitleIndex = entry.Request.TitleIndex,
+                    Status = EncodeStatus.Queued,
+                    CurrentOperation = "Waiting to send to the encoder server (resumed from your last session)"
+                };
+                // Reuse the ORIGINAL job id so the server's progress/completion pushes still map
+                // to this row.
+                lock (_shadowLock) { _remoteShadows[entry.Request.ClientJobId ?? ""] = shadow; }
+                RaiseEncode(shadow);
+                count++;
+            }
+            return count;
         }
 
         /// <summary>Exposed so the UI can run a disc scan through the same MakeMKV service.</summary>

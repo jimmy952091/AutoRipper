@@ -97,25 +97,37 @@ namespace MediaRipperEncoder.Services.Net
             if (_running) { return; }
             _running = true;
 
-            // Resume anything the last session still owed the server. Without this, closing the
-            // app (to install an update, say) stranded finished rips: the files were on disk but
-            // the app had forgotten them AND their confirmed metadata, so the disc had to be
-            // ripped again. Entries whose file has since vanished are dropped by the store.
-            List<OutboxEntry> resumed = OutboxStore.Load();
-            if (resumed.Count > 0)
-            {
-                lock (_outboxLock)
-                {
-                    foreach (OutboxEntry entry in resumed)
-                    {
-                        _outbox.Enqueue(new PendingSubmit { Request = entry.Request, FilePath = entry.FilePath });
-                    }
-                }
-                PersistOutbox(); // rewrite without any dropped-file entries
-            }
-
             _sessionThread = new Thread(SessionLoop) { IsBackground = true, Name = "RemoteEncode-Session" };
             _sessionThread.Start();
+        }
+
+        /// <summary>
+        /// Re-queues the transfers the previous session hadn't finished, and RETURNS them so the
+        /// caller can recreate its UI rows.
+        ///
+        /// Deliberately NOT done in <see cref="Start"/>: resuming there happened before the host
+        /// had wired its events and without rebuilding the encode-list entries, so a recovered
+        /// upload ran completely invisibly — the queue looked empty and it read as lost work even
+        /// though the file was being sent. Call this AFTER subscribing to the host's events.
+        /// </summary>
+        public List<OutboxEntry> ResumePersisted()
+        {
+            List<OutboxEntry> resumed = OutboxStore.Load();
+            if (resumed.Count == 0) { return resumed; }
+
+            lock (_outboxLock)
+            {
+                foreach (OutboxEntry entry in resumed)
+                {
+                    _outbox.Enqueue(new PendingSubmit { Request = entry.Request, FilePath = entry.FilePath });
+                }
+            }
+            PersistOutbox();  // rewrite without any dropped-file entries
+            _wake.Set();      // nudge the session thread to start sending immediately
+
+            Logger.Info("RemoteEncodeClient: resumed " + resumed.Count +
+                        " unsent transfer(s) from the previous session.");
+            return resumed;
         }
 
         /// <summary>
