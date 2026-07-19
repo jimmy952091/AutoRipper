@@ -1,0 +1,81 @@
+name: Bug report
+description: Something went wrong while ripping, encoding, or transferring
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting this. The single most useful thing you can add is a diagnostics zip:
+        in AutoRipper, go to **Help → Report a problem…**, which packages your recent logs onto
+        your Desktop. Drag that `.zip` onto this issue.
+
+        *(GitHub won't accept `.log` or `.json` files directly — that's why the app zips them.)*
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What were you doing, and what did you expect instead?
+      placeholder: "I clicked Scan disc & configure on a DVD and…"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: setup
+    attributes:
+      label: How are you running AutoRipper?
+      options:
+        - Standalone (one PC does everything)
+        - Fleet (a separate encoder server, one or more rippers)
+        - Not sure
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        **If you chose Fleet:** please attach a diagnostics zip from the **encoder server** too,
+        not just the ripper. Most distributed problems can only be diagnosed by seeing both halves
+        of the conversation.
+
+  - type: input
+    id: version
+    attributes:
+      label: AutoRipper version
+      description: Help → About shows this (e.g. 0.2.4.05)
+      placeholder: "0.2.4.05"
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: "Windows 11 24H2 / Windows 7 SP1 / Server 2019"
+    validations:
+      required: true
+
+  - type: input
+    id: tools
+    attributes:
+      label: MakeMKV and HandBrake versions (if relevant)
+      placeholder: "MakeMKV 1.18.1, HandBrakeCLI 1.9.0"
+
+  - type: textarea
+    id: disc
+    attributes:
+      label: What disc was involved?
+      description: Type and title, if the problem happens with a particular disc.
+      placeholder: "DVD — a double-feature disc with two films on one side"
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I'm on the latest release (check the Releases page)
+          required: false
+        - label: I've attached a diagnostics zip (Help → Report a problem…)
+          required: false
+        - label: I understand this issue is public, and I've had a look at what's in the zip
+          required: false

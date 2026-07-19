@@ -22,6 +22,9 @@ namespace MediaRipperEncoder.Forms
         private readonly AppSettings _settings;
         private readonly SettingsEditorControl _editor;
 
+        // Advanced tab: scratch-folder housekeeping.
+        private CheckBox _deleteScratchAfterHandoff;
+
         // Advanced tab: network / mapped-drive rip source.
         private CheckBox _networkRipEnabled;
         private TextBox _networkRipSource;
@@ -212,7 +215,41 @@ namespace MediaRipperEncoder.Forms
             int py = _presetPanel.Bottom;
             var presetDivider = new Label { BorderStyle = BorderStyle.Fixed3D, Location = new Point(14, py + 6), Size = new Size(680, 2), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
             panel.Controls.Add(presetDivider);
-            int netTop = py + 20;
+
+            // ---- Scratch folder housekeeping ----
+            var houseHeading = new Label
+            {
+                Text = "Scratch folder housekeeping",
+                Font = new Font(Font, FontStyle.Bold),
+                AutoSize = true,
+                Location = new Point(14, py + 20)
+            };
+            _deleteScratchAfterHandoff = new CheckBox
+            {
+                Text = "Delete a raw rip once it is safely encoded or sent to the encoder server",
+                AutoSize = true,
+                Location = new Point(14, py + 46),
+                Checked = settings.DeleteScratchAfterHandoff
+            };
+            var houseBlurb = new Label
+            {
+                Text = "Recommended. Raw rips are big — several GB for a DVD and far more for a Blu-ray — " +
+                       "so a machine ripping disc after disc fills its drive quickly. The file is only ever " +
+                       "removed once its content is safe elsewhere: encoded and placed in your library, or " +
+                       "fully transferred and verified by the encoder server. Untick to keep every raw rip " +
+                       "and clean the folder out yourself.",
+                AutoSize = false,
+                Location = new Point(32, py + 68),
+                Size = new Size(650, 62)
+            };
+            panel.Controls.Add(houseHeading);
+            panel.Controls.Add(_deleteScratchAfterHandoff);
+            panel.Controls.Add(houseBlurb);
+
+            var houseDivider = new Label { BorderStyle = BorderStyle.Fixed3D, Location = new Point(14, py + 136), Size = new Size(680, 2), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+            panel.Controls.Add(houseDivider);
+
+            int netTop = py + 150;
 
             var heading = new Label
             {
@@ -327,6 +364,7 @@ namespace MediaRipperEncoder.Forms
 
             // Advanced tab fields aren't part of the shared editor — apply them here.
             _presetPanel.ApplyTo(_settings);
+            _settings.DeleteScratchAfterHandoff = _deleteScratchAfterHandoff.Checked;
             _settings.NetworkRipEnabled = _networkRipEnabled.Checked;
             _settings.NetworkRipSource = (_networkRipSource.Text ?? "").Trim();
             _settings.NetworkRipSearchSubfolders = _networkRipSearchSubfolders.Checked;

@@ -230,6 +230,8 @@ namespace MediaRipperEncoder.Forms
             toolsMenu.DropDownItems.Add(_showWelcomeMenuItem);
 
             var helpMenu = new ToolStripMenuItem("&Help");
+            helpMenu.DropDownItems.Add(new ToolStripMenuItem("&Report a problem...", null, OnReportProblem));
+            helpMenu.DropDownItems.Add(new ToolStripSeparator());
             helpMenu.DropDownItems.Add(new ToolStripMenuItem("&About AutoRipper...", null, OnAboutClicked));
             helpMenu.DropDownItems.Add(new ToolStripSeparator());
             helpMenu.DropDownItems.Add(new ToolStripMenuItem("&Uninstall AutoRipper...", null, OnUninstallClicked));
@@ -252,6 +254,14 @@ namespace MediaRipperEncoder.Forms
                     // its current wiring until restart (the dialog told the user so).
                     _settings = SettingsStore.Load();
                 }
+            }
+        }
+
+        private void OnReportProblem(object sender, EventArgs e)
+        {
+            using (var dialog = new ReportProblemDialog(_settings))
+            {
+                dialog.ShowDialog(this);
             }
         }
 

@@ -21,6 +21,16 @@ namespace MediaRipperEncoder.Services
         public static PlacementResult FinishAndPlace(EncodeJob job,
             Func<PlacementPlan, ConflictResolution> resolveConflict)
         {
+            return FinishAndPlace(job, resolveConflict, null);
+        }
+
+        /// <summary>
+        /// As above, plus the scratch folder root so the emptied per-job staging folder can be
+        /// swept once the encoded file has been moved into the library. Pass null to skip that.
+        /// </summary>
+        public static PlacementResult FinishAndPlace(EncodeJob job,
+            Func<PlacementPlan, ConflictResolution> resolveConflict, string scratchRoot)
+        {
             // Tag the staged file before it's moved. Music files get the full embedded tag set
             // (artist/album/track/cover — media servers read music metadata from tags, not
             // filenames); video files get the Title tag so players show the episode name
@@ -72,6 +82,12 @@ namespace MediaRipperEncoder.Services
             else
             {
                 job.CurrentOperation = "Placed -> " + result.FinalPath;
+
+                // The encoded file has been moved into the library, so its per-job staging folder
+                // (Scratch\enc_<id>) is now empty. Sweep it, or these pile up forever — they cost
+                // no disk space but they're exactly the clutter the scratch folder shouldn't
+                // accumulate. Only ever removes an EMPTY folder, and never the scratch root.
+                ScratchCleaner.RemoveEmptyStagingFolder(job.OutputFile, scratchRoot);
 
                 // First placed track of an album also drops cover.jpg beside it — some media
                 // servers/pickers prefer a folder image over the embedded one.

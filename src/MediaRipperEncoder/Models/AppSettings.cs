@@ -72,6 +72,16 @@ namespace MediaRipperEncoder.Models
         /// <summary>Scratch folder where MakeMKV writes raw rips before HandBrake encodes them.</summary>
         public string TempFolder { get; set; }
 
+        /// <summary>
+        /// Delete a raw rip from the scratch folder once it is safely dealt with — encoded and
+        /// placed in the library (Standalone), or fully transferred to the encoder server
+        /// (Client Node). Raw rips are large (4-8 GB a DVD, far more for Blu-ray), so leaving
+        /// them behind fills a drive quickly and makes the user do manual housekeeping between
+        /// discs. The encoder server has always cleaned up its own received files this way; this
+        /// applies the same courtesy on the ripping side. Turn OFF to keep every raw rip.
+        /// </summary>
+        public bool DeleteScratchAfterHandoff { get; set; }
+
         // --- App state / preferences ---
 
         /// <summary>False once the user ticks "Don't show this again" on the welcome screen.</summary>
@@ -156,6 +166,7 @@ namespace MediaRipperEncoder.Models
             TvShowsRoot = "";
             MusicRoot = "";
             TempFolder = "";
+            DeleteScratchAfterHandoff = true;
             ShowWelcomeOnStartup = true;
             SetupCompleted = false;
             LastUsedDrive = "";

@@ -77,6 +77,13 @@ namespace MediaRipperEncoder.Services.Net
         public event Action<string, long, long> UploadProgress;
 
         /// <summary>
+        /// A file has been FULLY transferred and checksum-verified by the server, which now owns
+        /// it (and persists it across its own restarts). The local raw rip is therefore redundant
+        /// — the host may delete it to keep the scratch folder from filling up. Background thread.
+        /// </summary>
+        public event Action<string> FileHandedOff;
+
+        /// <summary>
         /// A human-readable connection notice worth showing in the status bar — e.g. "the server
         /// is at its ripper limit; waiting for a slot". Background thread.
         /// </summary>
@@ -237,6 +244,9 @@ namespace MediaRipperEncoder.Services.Net
                     // restart doesn't re-send a file the server already has).
                     lock (_outboxLock) { _outbox.Dequeue(); }
                     PersistOutbox();
+
+                    var handed = FileHandedOff;
+                    if (handed != null) { handed(next.FilePath); }
                     continue;
                 }
 

@@ -104,6 +104,7 @@ namespace MediaRipperEncoder.Services
                 _remote.Notice += text => { var h = RemoteNotice; if (h != null) h(text); };
                 _remote.JobStatusChanged += OnRemoteJobStatus;
                 _remote.UploadProgress += OnRemoteUploadProgress;
+                _remote.FileHandedOff += OnRemoteFileHandedOff;
                 _remote.Start();
                 Logger.Info("PipelineCoordinator: RipperClient mode — encoding offloaded to " +
                             settings.NodeServerHost + ":" + settings.NodePort + ".");
@@ -434,6 +435,18 @@ namespace MediaRipperEncoder.Services
             _remote.SubmitJob(request, mkv);
         }
 
+        /// <summary>
+        /// A rip has been fully transferred to (and verified by) the encoder server, which owns it
+        /// from here and keeps it across its own restarts. Delete our raw copy so a machine that
+        /// rips disc after disc doesn't quietly fill its drive.
+        /// </summary>
+        private void OnRemoteFileHandedOff(string filePath)
+        {
+            if (!_settings.DeleteScratchAfterHandoff) { return; }
+            ScratchCleaner.RemoveHandledRip(filePath, _settings.TempFolder,
+                "transferred to the encoder server");
+        }
+
         private void OnRemoteUploadProgress(string clientJobId, long sent, long total)
         {
             EncodeJob shadow = Shadow(clientJobId);
@@ -493,7 +506,18 @@ namespace MediaRipperEncoder.Services
             }
 
             // Shared tag-and-place step (same one the remote encoder server uses).
-            PlacementResult result = EncodeFinisher.FinishAndPlace(job, ResolveConflict);
+            PlacementResult result = EncodeFinisher.FinishAndPlace(job, ResolveConflict, _settings.TempFolder);
+
+            // The encoded file is now in the library, so the raw rip has served its purpose.
+            // Only after a genuinely successful placement — a failed or skipped one means the
+            // library copy isn't there, and the rip is still the only copy.
+            if (_settings.DeleteScratchAfterHandoff &&
+                result.Outcome != PlacementOutcome.Failed &&
+                result.Outcome != PlacementOutcome.Skipped)
+            {
+                ScratchCleaner.RemoveHandledRip(job.InputFile, _settings.TempFolder,
+                    "encoded and placed in the library");
+            }
 
             Action<EncodeJob, PlacementResult> handler = FilePlaced;
             if (handler != null) { handler(job, result); }

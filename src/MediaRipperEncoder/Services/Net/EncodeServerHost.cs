@@ -435,7 +435,7 @@ namespace MediaRipperEncoder.Services.Net
             {
                 // Same tag-and-place as local; null resolver = KeepBoth (never silently overwrite),
                 // correct for a possibly-headless server node.
-                result = EncodeFinisher.FinishAndPlace(job, null);
+                result = EncodeFinisher.FinishAndPlace(job, null, _settings.TempFolder);
                 ok = result.Outcome != PlacementOutcome.Failed;
                 if (!ok)
                 {
