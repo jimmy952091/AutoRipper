@@ -201,7 +201,7 @@ namespace MediaRipperEncoder.Services
         /// placement) — the same two-queue flow as a video disc, per the one-flow design.
         /// </summary>
         public RipJob StartMusicJob(Models.MusicRelease release, Models.AudioCdToc toc,
-            string driveLetter, string formatId)
+            string driveLetter, string formatId, ConflictResolution? remoteConflictPolicy = null)
         {
             var results = new List<RipTitleResult>();
             foreach (Models.AudioTrack track in release.Tracks)
@@ -222,6 +222,7 @@ namespace MediaRipperEncoder.Services
                 Toc = toc,
                 Release = release,
                 AudioFormatId = formatId,
+                RemoteConflictPolicy = remoteConflictPolicy,
                 DiscLabel = release.Artist + " — " + release.Album +
                             (string.IsNullOrEmpty(release.Year) ? "" : " (" + release.Year + ")") + " [CD]",
                 OutputDirectory = Path.Combine(_settings.TempFolder,
@@ -388,6 +389,7 @@ namespace MediaRipperEncoder.Services
                 _encodeQueue.Enqueue(new EncodeJob
                 {
                     Kind = JobKind.Music,
+                    RemoteConflictPolicy = job.RemoteConflictPolicy,
                     InputFile = wav,
                     OutputFile = Path.Combine(_settings.TempFolder,
                         "enc_" + Guid.NewGuid().ToString("N").Substring(0, 8), target.FileName),
@@ -505,8 +507,16 @@ namespace MediaRipperEncoder.Services
                 return; // ad-hoc encode with no library target — leave it where it is.
             }
 
-            // Shared tag-and-place step (same one the remote encoder server uses).
-            PlacementResult result = EncodeFinisher.FinishAndPlace(job, ResolveConflict, _settings.TempFolder);
+            // Shared tag-and-place step (same one the remote encoder server uses). A job queued
+            // from the dashboard carries its conflict answer with it — nobody is at this machine
+            // to answer the usual prompt, so use the pre-decided policy instead of asking.
+            Func<PlacementPlan, ConflictResolution> resolver = ResolveConflict;
+            if (job.RemoteConflictPolicy.HasValue)
+            {
+                ConflictResolution decided = job.RemoteConflictPolicy.Value;
+                resolver = plan => decided;
+            }
+            PlacementResult result = EncodeFinisher.FinishAndPlace(job, resolver, _settings.TempFolder);
 
             // The encoded file is now in the library, so the raw rip has served its purpose.
             // Only after a genuinely successful placement — a failed or skipped one means the

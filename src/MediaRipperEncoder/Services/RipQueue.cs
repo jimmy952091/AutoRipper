@@ -199,8 +199,11 @@ namespace MediaRipperEncoder.Services
             else
             {
                 // Don't fail the rip over a failed eject — the files are safe — but make the
-                // user aware they need to remove the disc by hand.
-                job.CurrentOperation = "Ripped OK, but auto-eject FAILED — remove the disc manually.";
+                // user aware they need to remove the disc by hand. On Windows 7 the usual fix is
+                // running AutoRipper as administrator, so nudge toward that when it applies.
+                job.CurrentOperation = EjectService.Windows7AdminEjectHint().Length > 0
+                    ? "Ripped OK, but auto-eject FAILED — on Windows 7, try running AutoRipper as administrator (or remove the disc manually)."
+                    : "Ripped OK, but auto-eject FAILED — remove the disc manually.";
                 Logger.Error("Auto-eject failed for job " + job.ShortId + ": " + result.Message);
             }
             Raise(job);

@@ -84,6 +84,10 @@ namespace MediaRipperEncoder.Models
         /// <summary>Output format id ("flac"/"mp3"/"wav") chosen when the job was queued.</summary>
         public string AudioFormatId { get; set; }
 
+        /// <summary>Pre-decided placement-conflict answer for remotely queued jobs (see
+        /// <see cref="EncodeJob.RemoteConflictPolicy"/>); carried onto each encode job.</summary>
+        public Services.ConflictResolution? RemoteConflictPolicy { get; set; }
+
         public RipJob()
         {
             Id = Guid.NewGuid();

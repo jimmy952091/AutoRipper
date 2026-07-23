@@ -77,14 +77,18 @@ namespace MediaRipperEncoder.Services
                 };
             }
 
-            // Both failed — surface it; the user needs to know to eject manually.
+            // Both failed — surface it; the user needs to know to eject manually. On Windows 7 the
+            // real cause is usually that the optical drive can only be opened with administrator
+            // rights, so we add that tip UP FRONT — before the technical detail — so it stays
+            // visible even if a narrow window truncates the line. (See Windows7AdminEjectHint.)
             string combined = "MCI: " + mciError + " | DeviceIoControl: " + ioError;
             Logger.Error("Both eject methods failed for " + letter + ": " + combined);
             return new EjectResult
             {
                 Success = false,
                 Method = EjectMethod.None,
-                Message = "Couldn't eject automatically — please eject the disc manually. (" + combined + ")"
+                Message = "Couldn't eject automatically — please eject the disc manually." +
+                          Windows7AdminEjectHint() + "  (" + combined + ")"
             };
         }
 
@@ -149,7 +153,9 @@ namespace MediaRipperEncoder.Services
 
             // Raw device path for the volume, e.g. \\.\E:  (the leading \\.\ names the device
             // rather than a file path). GENERIC_READ + share read/write is enough to issue
-            // the eject control code.
+            // the eject control code. NOTE: on a locked-down Windows 7 this open can fail with
+            // ACCESS_DENIED (Win32 error 5) unless the app is elevated — that's expected, and the
+            // failure message points the user at "Run as administrator" (see Windows7AdminEjectHint).
             string rawPath = @"\\.\" + letter + ":";
 
             SafeFileHandle handle = CreateFile(rawPath, GENERIC_READ,
@@ -198,6 +204,55 @@ namespace MediaRipperEncoder.Services
         private static extern bool DeviceIoControl(SafeFileHandle device, uint ioControlCode,
             IntPtr inBuffer, uint inBufferSize, IntPtr outBuffer, uint outBufferSize,
             out uint bytesReturned, IntPtr overlapped);
+
+        // --- Windows 7 admin hint ---
+
+        /// <summary>
+        /// Tip appended to the eject-FAILURE message, but ONLY on Windows 7 AND only when the app is
+        /// not already elevated. On Windows 7 the optical drive can require administrator rights to
+        /// open for eject — confirmed on Ultimate (e.g. after an in-place edition upgrade), while
+        /// Home Premium generally does not need it. Returns "" on Windows 10+/Server, or when the
+        /// app is already running as administrator, so the message stays clean where the tip would
+        /// not apply (Windows 10 never even reaches the failure path — MCI succeeds there).
+        /// Public so the rip queue can decide whether to add the same nudge to its status line.
+        /// </summary>
+        public static string Windows7AdminEjectHint()
+        {
+            try
+            {
+                // OSVersion reports 6.1 for Windows 7 (Win8+ caps at 6.2 without a manifest, so this
+                // can't false-positive on a newer OS). Good enough to gate a help hint.
+                OperatingSystem os = Environment.OSVersion;
+                bool isWin7 = os.Platform == PlatformID.Win32NT &&
+                              os.Version.Major == 6 && os.Version.Minor == 1;
+                if (!isWin7 || IsElevated()) { return ""; }
+
+                return " On Windows 7, ejecting a disc can require administrator rights (needed on " +
+                       "some editions such as Ultimate; Home Premium generally does not) — try " +
+                       "right-clicking AutoRipper and choosing \"Run as administrator\".";
+            }
+            catch
+            {
+                return "";
+            }
+        }
+
+        /// <summary>True if the current process is running with an Administrator token.</summary>
+        private static bool IsElevated()
+        {
+            try
+            {
+                using (var id = System.Security.Principal.WindowsIdentity.GetCurrent())
+                {
+                    var principal = new System.Security.Principal.WindowsPrincipal(id);
+                    return principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
 
         // --- helpers ---
 

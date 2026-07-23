@@ -148,6 +148,32 @@ namespace MediaRipperEncoder.Models
         /// </summary>
         public int NodeMaxClients { get; set; }
 
+        // --- Online dashboard (Phase A: LAN web monitor) ---
+        // Any instance can HOST a small web dashboard; any instance can REPORT its status to a host.
+        // Both reuse NodeSharedSecret for auth (browser login + HMAC-signed reports). LAN-only, and
+        // it binds a high port so it runs without administrator rights.
+
+        /// <summary>When true, THIS instance runs the dashboard web server (the monitor page).</summary>
+        public bool DashboardEnabled { get; set; }
+
+        /// <summary>TCP port the dashboard web server listens on / reporters send to. Default 8211.</summary>
+        public int DashboardPort { get; set; }
+
+        /// <summary>
+        /// Host/IP of the dashboard to report this instance's status to. Blank = don't report to a
+        /// remote host (a dashboard host still shows itself). Every instance that should appear on
+        /// the board sets this to the host's address (and shares the same secret + port).
+        /// </summary>
+        public string DashboardReportTo { get; set; }
+
+        /// <summary>
+        /// When true (default), a logged-in dashboard browser can set up a new disc on THIS machine
+        /// (scan → confirm metadata → queue), exactly like standing at its keyboard. Turn off to
+        /// make this machine monitor-only on the board. Ignored for the EncoderServer role, which
+        /// has no ripping drive to drive.
+        /// </summary>
+        public bool DashboardAllowRemoteSetup { get; set; }
+
         public AppSettings()
         {
             // Sensible defaults for a brand-new install.
@@ -179,6 +205,10 @@ namespace MediaRipperEncoder.Models
             NodeServerHost = "";
             NodeSharedSecret = "";
             NodeMaxClients = 3;
+            DashboardEnabled = false;
+            DashboardPort = 8211;
+            DashboardReportTo = "";
+            DashboardAllowRemoteSetup = true;
         }
     }
 }

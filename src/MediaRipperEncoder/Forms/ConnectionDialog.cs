@@ -23,6 +23,13 @@ namespace MediaRipperEncoder.Forms
         private readonly TextBox _secret;
         private readonly NumericUpDown _maxClients;
 
+        // Online dashboard (Phase A) — reuses the shared secret above.
+        private readonly CheckBox _dashboardEnabled;
+        private readonly NumericUpDown _dashboardPort;
+        private readonly TextBox _dashboardReportTo;
+        // Phase B: allow disc setup from the dashboard on this machine.
+        private readonly CheckBox _dashboardAllowSetup;
+
         public ConnectionDialog(AppSettings settings)
         {
             _settings = settings;
@@ -32,7 +39,7 @@ namespace MediaRipperEncoder.Forms
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
-            ClientSize = new Size(520, 400);
+            ClientSize = new Size(520, 626);
 
             var heading = new Label
             {
@@ -106,6 +113,59 @@ namespace MediaRipperEncoder.Forms
                 Size = new Size(486, 48)
             };
 
+            // --- Online dashboard section ---
+            var dashHeading = new Label
+            {
+                Text = "Online dashboard (monitor rips/encodes from a browser)",
+                Font = new Font(Font, FontStyle.Bold),
+                AutoSize = true,
+                Location = new Point(16, 272)
+            };
+            _dashboardEnabled = new CheckBox
+            {
+                Text = "Run the dashboard web page on this machine (this is the host)",
+                AutoSize = true,
+                Location = new Point(16, 298),
+                Checked = settings.DashboardEnabled
+            };
+
+            var dashPortLabel = new Label { Text = "Dashboard port:", AutoSize = true, Location = new Point(16, 328) };
+            _dashboardPort = new NumericUpDown
+            {
+                Location = new Point(180, 325),
+                Size = new Size(100, 23),
+                Minimum = 1024,
+                Maximum = 65535,
+                Value = settings.DashboardPort >= 1024 && settings.DashboardPort <= 65535 ? settings.DashboardPort : 8211
+            };
+
+            var reportLabel = new Label { Text = "Show this PC on host:", AutoSize = true, Location = new Point(16, 360) };
+            _dashboardReportTo = new TextBox
+            {
+                Location = new Point(180, 357),
+                Size = new Size(320, 23),
+                Text = settings.DashboardReportTo ?? ""
+            };
+
+            var dashBlurb = new Label
+            {
+                Text = "Tick the box on ONE machine to host the page (open http://<that PC>:<port>/ in any " +
+                       "browser). On every machine you want to see — including standalones — put the host's " +
+                       "name or IP in \"Show this PC on host\". All of them share the SAME secret and port " +
+                       "above. Log in to the page with that secret. LAN only — do not port-forward.",
+                AutoSize = false,
+                Location = new Point(16, 386),
+                Size = new Size(486, 60)
+            };
+
+            _dashboardAllowSetup = new CheckBox
+            {
+                Text = "Allow setting up new discs from the dashboard on this PC (scan, confirm, rip)",
+                AutoSize = true,
+                Location = new Point(16, 450),
+                Checked = settings.DashboardAllowRemoteSetup
+            };
+
             var note = new Label
             {
                 Text = "Every machine in the session — the server and each ripper — must use the same port " +
@@ -113,12 +173,12 @@ namespace MediaRipperEncoder.Forms
                        "on this machine.\r\n\r\n" +
                        "LAN only — do not forward this port through your router; use a VPN for remote access.",
                 AutoSize = false,
-                Location = new Point(16, 264),
+                Location = new Point(16, 482),
                 Size = new Size(486, 76)
             };
 
-            var save = new Button { Text = "Save", Size = new Size(110, 30), Location = new Point(280, 354) };
-            var cancel = new Button { Text = "Cancel", Size = new Size(100, 30), Location = new Point(400, 354), DialogResult = DialogResult.Cancel };
+            var save = new Button { Text = "Save", Size = new Size(110, 30), Location = new Point(280, 578) };
+            var cancel = new Button { Text = "Cancel", Size = new Size(100, 30), Location = new Point(400, 578), DialogResult = DialogResult.Cancel };
             save.Click += OnSave;
             AcceptButton = save;
             CancelButton = cancel;
@@ -136,6 +196,14 @@ namespace MediaRipperEncoder.Forms
             Controls.Add(maxLabel);
             Controls.Add(_maxClients);
             Controls.Add(maxBlurb);
+            Controls.Add(dashHeading);
+            Controls.Add(_dashboardEnabled);
+            Controls.Add(dashPortLabel);
+            Controls.Add(_dashboardPort);
+            Controls.Add(reportLabel);
+            Controls.Add(_dashboardReportTo);
+            Controls.Add(dashBlurb);
+            Controls.Add(_dashboardAllowSetup);
             Controls.Add(note);
             Controls.Add(save);
             Controls.Add(cancel);
@@ -146,6 +214,8 @@ namespace MediaRipperEncoder.Forms
             var role = (NodeRole)_role.SelectedIndex;
             string host = (_host.Text ?? "").Trim();
             string secret = (_secret.Text ?? "").Trim();
+            bool dashEnabled = _dashboardEnabled.Checked;
+            string reportTo = (_dashboardReportTo.Text ?? "").Trim();
 
             // Catch the two configurations that LOOK saved but can't work, before persisting.
             if (role == NodeRole.RipperClient && host.Length == 0)
@@ -160,18 +230,35 @@ namespace MediaRipperEncoder.Forms
                     "Missing shared secret", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
+            // The dashboard reuses the shared secret (for browser login + signed reports), so it
+            // can't work without one — catch that here rather than failing quietly at runtime.
+            if ((dashEnabled || reportTo.Length > 0) && secret.Length == 0)
+            {
+                MessageBox.Show(this, "The online dashboard uses the shared secret above (for browser " +
+                    "login and to sign status reports). Set a shared secret to host or report to a dashboard.",
+                    "Missing shared secret", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
 
             bool changed = _settings.NodeRole != role ||
                            _settings.NodeServerHost != host ||
                            _settings.NodePort != (int)_port.Value ||
                            _settings.NodeSharedSecret != secret ||
-                           _settings.NodeMaxClients != (int)_maxClients.Value;
+                           _settings.NodeMaxClients != (int)_maxClients.Value ||
+                           _settings.DashboardEnabled != dashEnabled ||
+                           _settings.DashboardPort != (int)_dashboardPort.Value ||
+                           _settings.DashboardReportTo != reportTo ||
+                           _settings.DashboardAllowRemoteSetup != _dashboardAllowSetup.Checked;
 
             _settings.NodeRole = role;
             _settings.NodeServerHost = host;
             _settings.NodePort = (int)_port.Value;
             _settings.NodeSharedSecret = secret;
             _settings.NodeMaxClients = (int)_maxClients.Value;
+            _settings.DashboardEnabled = dashEnabled;
+            _settings.DashboardPort = (int)_dashboardPort.Value;
+            _settings.DashboardReportTo = reportTo;
+            _settings.DashboardAllowRemoteSetup = _dashboardAllowSetup.Checked;
 
             try
             {

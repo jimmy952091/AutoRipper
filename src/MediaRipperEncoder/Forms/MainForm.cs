@@ -51,6 +51,19 @@ namespace MediaRipperEncoder.Forms
         // EncoderServer role only: receives rips from a client and encodes them here.
         private Services.Net.EncodeServerHost _encodeServer;
 
+        // Online dashboard (Phase A). _dashboardState always exists and collects this instance's
+        // status; the server/reporter/registry are created only when the relevant settings are on.
+        private Services.Dashboard.DashboardState _dashboardState;
+        private Services.Dashboard.DashboardServer _dashboardServer;
+        private Services.Dashboard.DashboardReporter _dashboardReporter;
+
+        // Phase B: remote disc setup from the dashboard. Created only when this machine allows it.
+        private Services.Dashboard.RemoteSetupAgent _setupAgent;
+
+        // True while a rip is running — the remote-setup agent refuses to scan/process then.
+        // Rips are serialized (one at a time), so the most recent rip event tells the truth.
+        private volatile bool _rippingActive;
+
         // Rip side: one group per disc, one row per title.
         private readonly Dictionary<Guid, ListViewGroup> _ripGroups = new Dictionary<Guid, ListViewGroup>();
         private readonly Dictionary<string, ListViewItem> _ripTitleRows = new Dictionary<string, ListViewItem>();
@@ -92,6 +105,11 @@ namespace MediaRipperEncoder.Forms
             _pipeline.ManualDiscChangeRequested += OnManualDiscChangeRequested;
             _pipeline.ResolveConflict = ResolveConflict;
 
+            // Dashboard status collector — created BEFORE ResumePersistedEncodes below, since that
+            // raises encode events we want reflected on the board. Collecting status is passive and
+            // never interferes with rip/encode work.
+            _dashboardState = new Services.Dashboard.DashboardState(_settings);
+
             UpdateProviderModeLabel();
             ConfigureForNodeRole();
 
@@ -104,12 +122,96 @@ namespace MediaRipperEncoder.Forms
                           "nothing needs re-ripping.", false);
             }
 
+            StartDashboardIfConfigured();
+
             Load += (s, e) => RefreshDrives(selectLetter: _settings.LastUsedDrive);
             FormClosed += (s, e) =>
             {
+                if (_dashboardReporter != null) { _dashboardReporter.Dispose(); }
+                if (_setupAgent != null) { _setupAgent.Dispose(); }
+                if (_dashboardServer != null) { _dashboardServer.Dispose(); }
                 if (_pipeline != null) { _pipeline.Dispose(); }
                 if (_encodeServer != null) { _encodeServer.Dispose(); }
             };
+        }
+
+        /// <summary>
+        /// Brings up the online dashboard per settings: hosts the web server if this instance is the
+        /// dashboard host, and/or starts reporting this instance's status to a host. Entirely
+        /// best-effort — a dashboard problem is surfaced in the status bar but never blocks ripping.
+        /// </summary>
+        private void StartDashboardIfConfigured()
+        {
+            bool hosting = _settings.DashboardEnabled;
+            bool reporting = !string.IsNullOrWhiteSpace(_settings.DashboardReportTo);
+            if (!hosting && !reporting) { return; }
+
+            Services.Dashboard.DashboardRegistry registry = null;
+
+            if (hosting)
+            {
+                try
+                {
+                    registry = new Services.Dashboard.DashboardRegistry();
+                    _dashboardServer = new Services.Dashboard.DashboardServer(_settings, registry);
+                    _dashboardServer.Start();
+                    SetStatus("Dashboard running on port " + _settings.DashboardPort +
+                              " — open http://<this PC>:" + _settings.DashboardPort +
+                              "/ in a browser. LAN only; do not port-forward.", false);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("Dashboard server failed to start.", ex);
+                    SetStatus("Dashboard could not start: " + ex.Message, true);
+                    registry = null;
+                    _dashboardServer = null;
+                }
+            }
+
+            // Phase B: remote disc setup — only where there's a drive to drive (not the encoder
+            // server role) and the user hasn't turned it off for this machine.
+            Services.Dashboard.DashboardCommandHub hub =
+                _dashboardServer != null ? _dashboardServer.CommandHub : null;
+            if (_settings.DashboardAllowRemoteSetup && _settings.NodeRole != NodeRole.EncoderServer)
+            {
+                var backend = new Services.Dashboard.LiveSetupBackend(
+                    _settings, _pipeline, () => _rippingActive);
+                backend.JobQueued += job => UI(() =>
+                {
+                    AddRipJob(job);
+                    SetStatus("Queued '" + job.DiscLabel + "' for ripping (set up from the dashboard).", false);
+                });
+                // Remote "Retry failed" reuses the desktop button's logic, hopped onto the UI
+                // thread (it walks the rip list). Invoke blocks the agent worker briefly, which is
+                // fine — commands are sequential by design.
+                backend.RetryFailedHandler = () =>
+                {
+                    int retried = 0;
+                    try
+                    {
+                        Invoke((MethodInvoker)delegate { retried = RetryFailedCore(); });
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new InvalidOperationException("Couldn't retry on that machine: " + ex.Message);
+                    }
+                    return retried == 0
+                        ? "No failed titles to retry on that machine."
+                        : "Re-queued " + retried + " failed title(s) from its most recent failed disc — " +
+                          "make sure that disc is still in the drive.";
+                };
+                _setupAgent = new Services.Dashboard.RemoteSetupAgent(backend);
+                _dashboardState.AllowsRemoteSetup = true;
+            }
+
+            // Report our own status: to the local registry if we host, and/or to a remote host.
+            // The reporter also carries remote-setup commands back on the same 2-second cycle.
+            if (hosting || reporting)
+            {
+                _dashboardReporter = new Services.Dashboard.DashboardReporter(
+                    _settings, _dashboardState, registry, hub, _setupAgent);
+                _dashboardReporter.Start();
+            }
         }
 
         /// <summary>
@@ -139,6 +241,10 @@ namespace MediaRipperEncoder.Forms
 
         private void OnRemoteConnectionChanged(bool connected)
         {
+            if (_dashboardState != null)
+            {
+                _dashboardState.SetRemoteConnection(connected, _settings.NodeServerHost);
+            }
             UI(() =>
             {
                 _encodeGroup.Text = connected
@@ -180,14 +286,22 @@ namespace MediaRipperEncoder.Forms
                 // connection refused — possible spoof" (the one worth investigating).
                 _encodeServer.ServerNotice += text => UI(() => SetStatus(text, true));
                 // Live roster in the panel title: how many rippers are connected, and who.
-                _encodeServer.ClientsChanged += (count, max, names) => UI(() =>
+                _encodeServer.ClientsChanged += (count, max, names) =>
+                {
+                    if (_dashboardState != null)
+                    {
+                        _dashboardState.SetConnectionInfo(count + "/" + max + " ripper" + (count == 1 ? "" : "s") +
+                            (names != null && names.Length > 0 ? ": " + string.Join(", ", names) : ""));
+                    }
+                    UI(() =>
                 {
                     _encodeGroup.Text = count == 0
                         ? "Encode queue (Encoder Server — port " + _settings.NodePort + " — no rippers connected)"
                         : "Encode queue (Encoder Server — port " + _settings.NodePort + " — " +
                           count + "/" + max + " ripper" + (count == 1 ? "" : "s") + ": " +
                           string.Join(", ", names) + ")";
-                });
+                    });
+                };
                 _encodeServer.Start();
                 _encodeGroup.Text = "Encode queue (Encoder Server — listening on port " + _settings.NodePort + ")";
                 SetStatus("Encoder Server node running on port " + _settings.NodePort +
@@ -732,6 +846,8 @@ namespace MediaRipperEncoder.Forms
 
         private void OnRipJobUpdated(RipJob job)
         {
+            _rippingActive = job.Status == RipStatus.Ripping;
+            if (_dashboardState != null) { _dashboardState.UpdateRip(job); }
             UI(() =>
             {
                 ListViewGroup group;
@@ -813,8 +929,27 @@ namespace MediaRipperEncoder.Forms
 
         private void OnRetryFailed(object sender, EventArgs e)
         {
-            // Collect failed title rows, grouped by the disc job they came from.
+            int retried = RetryFailedCore();
+            SetStatus(retried == 0
+                ? "No failed titles to retry."
+                : "Re-queued " + retried + " failed title(s) from the most recent failed disc. " +
+                  "Make sure that disc is still in the drive.", false);
+        }
+
+        /// <summary>
+        /// Re-queues the failed titles of the MOST RECENT disc that has any — not every failure
+        /// of the whole session. Only that disc can still be in the drive; re-queueing older
+        /// discs' failures would rip whatever is loaded now under the wrong metadata, forcing
+        /// the user to stop each one by hand. Shared by the desktop button and the dashboard's
+        /// remote "Retry failed" command. MUST run on the UI thread (walks the rip list).
+        /// Returns how many titles were re-queued.
+        /// </summary>
+        private int RetryFailedCore()
+        {
+            // Collect failed title rows, grouped by the disc job they came from, remembering
+            // which job appeared LAST in the list (list order = insertion order = disc order).
             var byJob = new Dictionary<Guid, List<int>>();
+            Guid lastFailedJob = Guid.Empty;
             foreach (ListViewItem item in _ripList.Items)
             {
                 var tag = item.Tag as RipRowTag;
@@ -824,30 +959,26 @@ namespace MediaRipperEncoder.Forms
                 List<int> list;
                 if (!byJob.TryGetValue(tag.JobId, out list)) { list = new List<int>(); byJob[tag.JobId] = list; }
                 list.Add(tag.TitleIndex);
+                lastFailedJob = tag.JobId;
             }
 
-            if (byJob.Count == 0)
+            RipJob original;
+            if (lastFailedJob == Guid.Empty || !_ripJobs.TryGetValue(lastFailedJob, out original))
             {
-                SetStatus("No failed titles to retry.", false);
-                return;
+                return 0;
             }
 
-            int retried = 0;
-            foreach (KeyValuePair<Guid, List<int>> kv in byJob)
-            {
-                RipJob original;
-                if (!_ripJobs.TryGetValue(kv.Key, out original)) { continue; }
-                RipJob retryJob = _pipeline.RetryTitles(original, kv.Value);
-                AddRipJob(retryJob);
-                retried += kv.Value.Count;
-            }
-            SetStatus("Re-queued " + retried + " failed title(s). Make sure the disc is still in the drive.", false);
+            List<int> indices = byJob[lastFailedJob];
+            RipJob retryJob = _pipeline.RetryTitles(original, indices);
+            AddRipJob(retryJob);
+            return indices.Count;
         }
 
         // ---------------- encode queue UI ----------------
 
         private void OnEncodeJobUpdated(EncodeJob job)
         {
+            if (_dashboardState != null) { _dashboardState.UpdateEncode(job); }
             UI(() =>
             {
                 _encodeJobs[job.Id] = job;

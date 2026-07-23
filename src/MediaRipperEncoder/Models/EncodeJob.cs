@@ -72,6 +72,13 @@ namespace MediaRipperEncoder.Models
         /// <summary>Output format id ("flac"/"mp3"/"wav") for Music jobs.</summary>
         public string AudioFormatId { get; set; }
 
+        /// <summary>
+        /// Pre-decided answer for a placement conflict (file already exists), set when the job was
+        /// queued remotely from the dashboard — nobody is at this machine to answer the usual
+        /// prompt. Null = ask the user as always.
+        /// </summary>
+        public Services.ConflictResolution? RemoteConflictPolicy { get; set; }
+
         public EncodeStatus Status { get; set; }
         public int ProgressPercent { get; set; }
         public string CurrentOperation { get; set; }
