@@ -17,7 +17,7 @@
        or upgrades will install side-by-side instead of replacing. -->
   <Package Name="AutoRipper"
            Manufacturer="James Spurgeon"
-           Version="0.3.0"
+           Version="0.3.0.1"
            UpgradeCode="6E1B9A47-3C52-4B7A-9D8E-2F0A61C4D513"
            Language="1033"
            Scope="perMachine"

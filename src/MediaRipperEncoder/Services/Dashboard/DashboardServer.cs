@@ -44,6 +44,11 @@ namespace MediaRipperEncoder.Services.Dashboard
     public class DashboardServer : IDisposable
     {
         private const string SessionCookie = "ar_dash";
+        // Alternative to the cookie, and the ONLY one that works when the dashboard is embedded in
+        // another site's iframe (the Home Assistant panel): browsers treat our cookie as
+        // third-party there and won't send it, and SameSite=None needs HTTPS, which a LAN HTTP
+        // service can't offer. A header is unaffected by cookie policy.
+        private const string SessionHeader = "X-AR-Session";
         private static readonly TimeSpan SessionLifetime = TimeSpan.FromHours(12);
         // An instance is shown if it reported within this window (a few missed 2s beats forgiven).
         private static readonly TimeSpan LivenessWindow = TimeSpan.FromSeconds(15);
@@ -341,16 +346,25 @@ namespace MediaRipperEncoder.Services.Dashboard
             }
 
             string token = NewSessionToken();
-            // HttpOnly so page script can't read it; SameSite=Strict to blunt CSRF. No Secure flag
-            // because this is plain HTTP on a LAN (there's no TLS to require).
+            // The session is handed back BOTH ways, because neither works everywhere:
+            //  * Cookie — HttpOnly + SameSite=Strict; ideal for a normal top-level browser tab.
+            //  * Token in the body — the page stores it and returns it as the X-AR-Session
+            //    header. This is what lets the dashboard work inside an iframe (see SessionHeader).
+            // Trade-off accepted: a token the page can read is visible to script, unlike an
+            // HttpOnly cookie. Fine here — the page is self-contained (no third-party scripts)
+            // and escapes everything it renders — and it's the standard pattern for embedded apps.
             string setCookie = "Set-Cookie: " + SessionCookie + "=" + token +
                                "; HttpOnly; SameSite=Strict; Path=/";
-            MiniHttp.WriteJson(stream, 200, "OK", "{\"ok\":true}", new[] { setCookie });
+            var okBody = new JObject();
+            okBody["ok"] = true;
+            okBody["token"] = token;
+            MiniHttp.WriteJson(stream, 200, "OK",
+                okBody.ToString(Newtonsoft.Json.Formatting.None), new[] { setCookie });
         }
 
         private void HandleLogout(MiniHttp.Request req, System.IO.Stream stream)
         {
-            string token = req.Cookie(SessionCookie);
+            string token = SessionTokenOf(req);
             if (!string.IsNullOrEmpty(token))
             {
                 lock (_sessionLock) { _sessions.Remove(token); }
@@ -380,9 +394,19 @@ namespace MediaRipperEncoder.Services.Dashboard
             MiniHttp.WriteJson(stream, 200, "OK", JsonConvert.SerializeObject(payload));
         }
 
+        /// <summary>
+        /// The caller's session token: the X-AR-Session header if present (iframe-safe), otherwise
+        /// the cookie (normal top-level tab). Empty when neither is supplied.
+        /// </summary>
+        private static string SessionTokenOf(MiniHttp.Request req)
+        {
+            string token = req.Header(SessionHeader);
+            return string.IsNullOrEmpty(token) ? req.Cookie(SessionCookie) : token;
+        }
+
         private bool IsAuthed(MiniHttp.Request req)
         {
-            string token = req.Cookie(SessionCookie);
+            string token = SessionTokenOf(req);
             if (string.IsNullOrEmpty(token)) { return false; }
             lock (_sessionLock)
             {

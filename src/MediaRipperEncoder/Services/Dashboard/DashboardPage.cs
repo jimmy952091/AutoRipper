@@ -174,6 +174,31 @@ namespace MediaRipperEncoder.Services.Dashboard
   var serverNow = 0;
   var timer = null;
 
+  // --- session ---
+  // The login cookie can't be used when this page is EMBEDDED in another site's iframe (the
+  // Home Assistant panel): browsers treat it as a third-party cookie and drop it, so every call
+  // came back 401 and bounced you to the login card. So we also keep the session token here and
+  // send it as a header, which no cookie policy can block. A normal tab works either way.
+  var TOKEN = '';
+  try { TOKEN = localStorage.getItem('ar_dash_token') || ''; } catch (e) { TOKEN = ''; }
+
+  function saveToken(t) {
+    TOKEN = t || '';
+    try {
+      if (TOKEN) { localStorage.setItem('ar_dash_token', TOKEN); }
+      else { localStorage.removeItem('ar_dash_token'); }
+    } catch (e) { /* private mode / storage disabled — the cookie still covers a normal tab */ }
+  }
+
+  // fetch options with the session header attached.
+  function auth(opts) {
+    opts = opts || {};
+    opts.credentials = 'same-origin';
+    opts.headers = opts.headers || {};
+    if (TOKEN) { opts.headers['X-AR-Session'] = TOKEN; }
+    return opts;
+  }
+
   function $(id) { return document.getElementById(id); }
   function esc(s) {
     return String(s == null ? '' : s)
@@ -275,8 +300,8 @@ namespace MediaRipperEncoder.Services.Dashboard
   }
 
   function load() {
-    fetch('/api/status', { credentials: 'same-origin' }).then(function (r) {
-      if (r.status === 401) { stopPolling(); show('login'); return null; }
+    fetch('/api/status', auth()).then(function (r) {
+      if (r.status === 401) { stopPolling(); saveToken(''); show('login'); return null; }
       return r.json();
     }).then(function (data) {
       if (!data || !data.ok) { return; }
@@ -301,8 +326,14 @@ namespace MediaRipperEncoder.Services.Dashboard
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ secret: secret })
     }).then(function (r) {
-      if (r.status === 200) { $('secret').value = ''; startPolling(); load(); }
-      else { $('loginErr').textContent = 'That secret was not accepted.'; }
+      if (r.status !== 200) { $('loginErr').textContent = 'That secret was not accepted.'; return null; }
+      return r.json();
+    }).then(function (data) {
+      if (!data) { return; }
+      saveToken(data.token);   // keeps us logged in even where cookies are blocked
+      $('secret').value = '';
+      startPolling();
+      load();
     }).catch(function () { $('loginErr').textContent = 'Could not reach the dashboard host.'; });
   }
 
@@ -313,16 +344,16 @@ namespace MediaRipperEncoder.Services.Dashboard
   // Enqueue a command for an instance, then poll until it finishes. alive() lets the caller
   // abandon polling (e.g. the wizard was closed).
   function cmdApi(instId, action, args, alive, cb) {
-    fetch('/api/do', {
-      method: 'POST', credentials: 'same-origin',
+    fetch('/api/do', auth({
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ instanceId: instId, action: action, args: args || {} })
-    }).then(function (r) { return r.json(); }).then(function (d) {
+    })).then(function (r) { return r.json(); }).then(function (d) {
       if (!d || !d.ok) { cb(false, (d && d.error) || 'Request failed.', null); return; }
       var deadline = Date.now() + 6 * 60 * 1000;
       var t = setInterval(function () {
         if (alive && !alive()) { clearInterval(t); return; }
-        fetch('/api/cmd?id=' + encodeURIComponent(d.id), { credentials: 'same-origin' })
+        fetch('/api/cmd?id=' + encodeURIComponent(d.id), auth())
           .then(function (r) { return r.json(); })
           .then(function (s) {
             if (!s) { return; }
@@ -1001,8 +1032,8 @@ namespace MediaRipperEncoder.Services.Dashboard
   $('next').addEventListener('click', function () { page++; render(); });
   $('logout').addEventListener('click', function (e) {
     e.preventDefault();
-    fetch('/logout', { method: 'POST', credentials: 'same-origin' }).then(function () {
-      stopPolling(); all = []; show('login');
+    fetch('/logout', auth({ method: 'POST' })).then(function () {
+      stopPolling(); saveToken(''); all = []; show('login');
     });
   });
 
