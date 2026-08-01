@@ -34,6 +34,13 @@ from-scratch implementation as a Windows program (no ARM code is used).
   single-core CPUs (see [COMPATIBILITY.md](COMPATIBILITY.md) for verified combinations and
   the Windows 7 HandBrake note). Light and Dark themes included.
 
+> **3D Blu-rays are ripped as standard 2D — not in 3D.** AutoRipper encodes with HandBrake,
+> which does not support the 3D (MVC) format, so the second eye-view is dropped and you get a
+> normal, correct 2D movie. **Preserving true 3D is not a goal of this app** and there is no 3D
+> setting to add — keeping both views means not re-encoding at all, plus a 3D display/player,
+> which is a separate manual workflow. If your 3D disc includes a 2D version (many do), either
+> title gives you the same 2D result.
+
 ## Requirements
 
 - Windows 7 SP1 or later, x64. (Linux via Wine is a soft target; WinForms was chosen with

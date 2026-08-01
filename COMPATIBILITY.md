@@ -49,6 +49,16 @@ Real-world verified combinations. "Verified" means actually run on hardware, not
   old installs missing DigiCert Global Root G2 / ISRG Root X1 get them as pinned fallback
   trust anchors; validation is not weakened.
 
+## Disc formats
+
+| Format | Support | Notes |
+|---|---|---|
+| DVD | ✅ | Standard path. |
+| Blu-ray | ✅ | Standard path. |
+| 4K UHD Blu-ray | ✅ (built; HDR path verified via GUI presets) | Needs a UHD-capable/reflashed drive and a MakeMKV beta key. Use a modern HandBrake for the 10-bit HDR10 pipeline (not 1.3.3). |
+| Audio CD | ✅ | Built-in ripper/encoder, no external tool. |
+| **3D Blu-ray** | **2D output only** | **Not a bug — by design.** 3D Blu-rays store two eye-views (MVC). HandBrake, which AutoRipper uses to encode, does not support MVC/3D and reads only the main view, so a 3D disc yields a normal **2D** movie. There is no 3D setting and none is planned: preserving 3D means *not* re-encoding (keep the raw MakeMKV MVC remux) plus a 3D-capable display/player — a separate manual workflow outside this app. Rip it as a regular **Blu-ray**; if the disc includes a 2D version, either title gives the same 2D result. |
+
 ## Distributed (two-machine) mode
 
 - ✅ Verified: **Windows 7 ripper client → Windows Server 2019 encoder server**, mixed Windows
